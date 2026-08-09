@@ -10,6 +10,7 @@ import {
 import { getDb } from "@/server/db";
 import { models, providerConnections } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
+import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import {
   assertSafeProviderBaseUrl,
   fetchProviderCatalog,
@@ -190,7 +191,8 @@ export async function resolveChatModel(
     return {
       languageModel: record.providerModelId,
       databaseModelId: record.id,
-      available: Boolean(process.env.AI_GATEWAY_API_KEY),
+      available: isAiGatewayConfigured(),
+      gatewayRouted: true,
     };
   }
 
@@ -214,6 +216,7 @@ export async function resolveChatModel(
     languageModel: provider(record.providerModelId),
     databaseModelId: record.id,
     available: Boolean(secret) || record.connectionType !== "gateway",
+    gatewayRouted: false,
   };
 }
 

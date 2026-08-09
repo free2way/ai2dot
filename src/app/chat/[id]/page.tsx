@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
 import { FEATURED_MODELS } from "@/lib/models";
 import { isClerkConfigured } from "@/server/auth/config";
+import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import {
   listConversations,
   listConversationBranches,
@@ -41,7 +42,7 @@ export default async function ConversationPage({
     <ChatWorkspace
       models={workspaceModels.length > 0 ? workspaceModels : FEATURED_MODELS}
       authEnabled
-      gatewayEnabled={Boolean(process.env.AI_GATEWAY_API_KEY)}
+      gatewayEnabled={isAiGatewayConfigured()}
       persistenceEnabled
       initialConversationId={id}
       initialBranchId={activeBranch.id}

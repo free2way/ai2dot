@@ -11,6 +11,12 @@ import {
 } from "ai";
 import { z } from "zod";
 import { DEFAULT_MODEL_ID, isFeaturedModel } from "@/lib/models";
+import { isClerkConfigured } from "@/server/auth/config";
+import { getRequestIdentity } from "@/server/auth/session";
+import {
+  getGatewayEnvironmentTag,
+  isAiGatewayConfigured,
+} from "@/server/ai/gateway";
 import { saveConversationMessages } from "@/server/chat/store";
 import { getDb } from "@/server/db";
 import { usageEvents } from "@/server/db/schema";
@@ -155,6 +161,11 @@ export async function POST(request: Request) {
 
   const needsWorkspace = Boolean(parsed.data.conversationId) || modelId.startsWith("db:");
   const workspaceContext = needsWorkspace ? await getWorkspaceContext() : null;
+  const gatewayConfigured = isAiGatewayConfigured();
+  const requestIdentity =
+    gatewayConfigured && isClerkConfigured()
+      ? await getRequestIdentity()
+      : null;
 
   if (parsed.data.conversationId && !workspaceContext) {
     return Response.json(
@@ -175,8 +186,10 @@ export async function POST(request: Request) {
   let languageModel: string | LanguageModel = modelId;
   let databaseModelId: string | undefined;
   let modelAvailable = isFeaturedModel(modelId)
-    ? Boolean(process.env.AI_GATEWAY_API_KEY)
+    ? gatewayConfigured &&
+      (!isClerkConfigured() || Boolean(requestIdentity))
     : false;
+  let gatewayRouted = isFeaturedModel(modelId);
   let responseMode = "gateway";
 
   if (!isFeaturedModel(modelId)) {
@@ -198,6 +211,7 @@ export async function POST(request: Request) {
       languageModel = resolved.languageModel;
       databaseModelId = resolved.databaseModelId;
       modelAvailable = resolved.available;
+      gatewayRouted = resolved.gatewayRouted;
       responseMode = "provider";
     } catch {
       return Response.json(
@@ -338,6 +352,18 @@ export async function POST(request: Request) {
     model: languageModel,
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
+    ...(gatewayRouted
+      ? {
+          providerOptions: {
+            gateway: {
+              ...(requestIdentity
+                ? { user: requestIdentity.externalAuthId }
+                : {}),
+              tags: ["feature:chat", getGatewayEnvironmentTag()],
+            },
+          },
+        }
+      : {}),
     abortSignal: request.signal,
     onError({ error }) {
       if (persistence) {

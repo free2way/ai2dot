@@ -534,7 +534,7 @@ export function ChatWorkspace({
           <div className="section-title"><span>当前能力</span><small>{selectedModel?.capabilities.length}</small></div>
           <div className="capability-list">{selectedModel?.capabilities.map((capability) => <span key={capability}><Check size={12} /> {capability}</span>)}</div>
         </section>
-        <div className="inspector-note"><span className={gatewayEnabled ? "status-live" : "status-demo"} /><p>{gatewayEnabled ? "请求通过 Vercel AI Gateway 安全转发。" : "添加 AI_GATEWAY_API_KEY 后启用真实模型。"}</p></div>
+        <div className="inspector-note"><span className={gatewayEnabled ? "status-live" : "status-demo"} /><p>{gatewayEnabled ? "请求通过 Vercel AI Gateway OIDC 安全转发。" : authEnabled ? "登录后即可使用真实模型。" : "连接 Vercel OIDC 或 Gateway API Key 后启用真实模型。"}</p></div>
       </aside>
     </main>
   );

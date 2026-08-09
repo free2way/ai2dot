@@ -10,7 +10,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-打开 `http://localhost:3000`。未配置 `AI_GATEWAY_API_KEY` 时会自动使用演示流；填写密钥后调用真实的 Vercel AI Gateway 模型。
+打开 `http://localhost:3000`。Vercel 部署默认使用自动轮换的 OIDC 调用 AI Gateway；本地执行 `vercel env pull .env.local --yes` 获取短期 OIDC Token。非 Vercel 环境也可以配置 `AI_GATEWAY_API_KEY`，两种认证都不可用时自动使用演示流。
 
 ## 云端会话与登录
 

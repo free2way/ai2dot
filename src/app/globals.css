@@ -1349,6 +1349,18 @@ textarea:focus-visible {
   background: var(--ink-2);
 }
 
+.setup-checklist > div[data-ready="false"] {
+  color: #666b60;
+}
+
+.setup-checklist > div[data-ready="true"] strong::after {
+  margin-left: 7px;
+  color: var(--acid);
+  font-family: var(--font-geist-mono);
+  font-size: 8px;
+  content: "READY";
+}
+
 .setup-checklist span {
   display: grid;
   gap: 4px;

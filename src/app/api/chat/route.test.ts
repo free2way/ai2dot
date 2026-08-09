@@ -17,6 +17,7 @@ afterEach(() => {
 describe("POST /api/chat", () => {
   it("returns a valid demo UI stream when Gateway is not configured", async () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
 
     const response = await POST(
       new Request("http://localhost/api/chat", {

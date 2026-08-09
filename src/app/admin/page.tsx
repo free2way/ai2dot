@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ProviderManager } from "@/components/admin/provider-manager";
 import { isClerkConfigured } from "@/server/auth/config";
+import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import {
   getAdminWorkspaceContext,
   isPersistenceConfigured,
@@ -11,13 +12,24 @@ import {
 } from "@/server/providers/store";
 
 export default async function AdminPage() {
+  const configuration = {
+    gatewayReady: isAiGatewayConfigured(),
+    authReady: isClerkConfigured(),
+    databaseReady: isPersistenceConfigured(),
+    encryptionReady: Boolean(process.env.PROVIDER_SECRET_ENCRYPTION_KEY),
+  };
   const infrastructureReady =
-    isClerkConfigured() &&
-    isPersistenceConfigured() &&
-    Boolean(process.env.PROVIDER_SECRET_ENCRYPTION_KEY);
+    configuration.authReady &&
+    configuration.databaseReady &&
+    configuration.encryptionReady;
 
   if (!infrastructureReady) {
-    return <ProviderManager infrastructureReady={false} />;
+    return (
+      <ProviderManager
+        infrastructureReady={false}
+        configuration={configuration}
+      />
+    );
   }
 
   const context = await getAdminWorkspaceContext();
@@ -31,6 +43,7 @@ export default async function AdminPage() {
   return (
     <ProviderManager
       infrastructureReady
+      configuration={configuration}
       initialProviders={providers}
       initialModels={models}
     />

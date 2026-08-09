@@ -38,6 +38,12 @@ type ProviderModelSummary = {
 
 type Props = {
   infrastructureReady: boolean;
+  configuration: {
+    gatewayReady: boolean;
+    authReady: boolean;
+    databaseReady: boolean;
+    encryptionReady: boolean;
+  };
   initialProviders?: ProviderSummary[];
   initialModels?: ProviderModelSummary[];
 };
@@ -50,6 +56,7 @@ const PROVIDER_LABELS = {
 
 export function ProviderManager({
   infrastructureReady,
+  configuration,
   initialProviders = [],
   initialModels = [],
 }: Props) {
@@ -167,16 +174,17 @@ export function ProviderManager({
           <section className="admin-setup-panel">
             <div className="setup-copy">
               <span className="setup-icon"><ServerCog size={24} /></span>
-              <p className="eyebrow">INFRASTRUCTURE REQUIRED</p>
-              <h2>后台功能已经就位，等待连接云服务</h2>
-              <p>完成下面三项配置后，供应商密钥将加密入库，模型目录可以随时在线刷新。</p>
+              <p className="eyebrow">MODEL INFRASTRUCTURE</p>
+              <h2>{configuration.gatewayReady ? "AI Gateway 已连接" : "等待连接模型网关"}</h2>
+              <p>{configuration.gatewayReady ? "三款默认模型已经可以通过 OIDC 调用。连接数据库后，即可持久化自定义供应商、在线刷新目录并按工作区启停模型。" : "完成下面的云服务配置后，供应商密钥将加密入库，模型目录可以随时在线刷新。"}</p>
             </div>
             <div className="setup-checklist">
-              <div><Database size={18} /><span><strong>Neon PostgreSQL</strong><small>配置 DATABASE_URL 并运行数据库迁移</small></span></div>
-              <div><ShieldCheck size={18} /><span><strong>Clerk Authentication</strong><small>配置 publishable key 与 secret key</small></span></div>
-              <div><KeyRound size={18} /><span><strong>AES-256 encryption</strong><small>生成 PROVIDER_SECRET_ENCRYPTION_KEY</small></span></div>
+              <div data-ready={configuration.gatewayReady}><ServerCog size={18} /><span><strong>Vercel AI Gateway</strong><small>{configuration.gatewayReady ? "OIDC 已连接，默认模型可用" : "启用 Gateway OIDC 或配置 API Key"}</small></span></div>
+              <div data-ready={configuration.authReady}><ShieldCheck size={18} /><span><strong>Clerk Authentication</strong><small>{configuration.authReady ? "登录与管理员鉴权已启用" : "配置 publishable key 与 secret key"}</small></span></div>
+              <div data-ready={configuration.databaseReady}><Database size={18} /><span><strong>Neon PostgreSQL</strong><small>{configuration.databaseReady ? "模型目录与工作区存储已连接" : "配置 DATABASE_URL 并运行数据库迁移"}</small></span></div>
+              <div data-ready={configuration.encryptionReady}><KeyRound size={18} /><span><strong>AES-256 encryption</strong><small>{configuration.encryptionReady ? "供应商凭据加密密钥已配置" : "生成 PROVIDER_SECRET_ENCRYPTION_KEY"}</small></span></div>
             </div>
-            <code>openssl rand -base64 32</code>
+            {!configuration.encryptionReady && <code>openssl rand -base64 32</code>}
           </section>
         ) : (
           <>
