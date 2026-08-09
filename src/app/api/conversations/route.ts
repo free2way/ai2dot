@@ -7,6 +7,7 @@ import { getWorkspaceContext } from "@/server/db/workspace";
 
 const createConversationSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
+  assistantId: z.string().uuid().optional(),
 });
 
 export async function GET() {
@@ -38,6 +39,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const conversation = await createConversation(context, parsed.data.title);
+  const conversation = await createConversation(context, parsed.data);
+  if (!conversation) {
+    return Response.json(
+      {
+        code: "ASSISTANT_NOT_FOUND",
+        message: "助手不存在或不属于当前工作区。",
+      },
+      { status: 404 },
+    );
+  }
   return Response.json({ conversation }, { status: 201 });
 }

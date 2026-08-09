@@ -92,6 +92,9 @@ type ChatWorkspaceProps = {
   initialConversations?: ConversationListItem[];
   initialBranches?: ConversationBranch[];
   initialContextCompacted?: boolean;
+  initialModelId?: string;
+  initialKnowledgeBaseIds?: string[];
+  initialAssistant?: { name: string; description?: string | null };
   initialKnowledgeBases?: KnowledgeBaseSummary[];
 };
 
@@ -115,11 +118,18 @@ export function ChatWorkspace({
   initialConversations = [],
   initialBranches = [],
   initialContextCompacted = false,
+  initialModelId,
+  initialKnowledgeBaseIds = [],
+  initialAssistant,
   initialKnowledgeBases = [],
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const [input, setInput] = useState("");
-  const [selectedModelId, setSelectedModelId] = useState(models[0]?.id ?? DEFAULT_MODEL_ID);
+  const [selectedModelId, setSelectedModelId] = useState(
+    models.some((model) => model.id === initialModelId)
+      ? initialModelId!
+      : models[0]?.id ?? DEFAULT_MODEL_ID,
+  );
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -135,7 +145,9 @@ export function ChatWorkspace({
   const [renamingConversationId, setRenamingConversationId] = useState<string>();
   const [renameValue, setRenameValue] = useState("");
   const [sessionBusyId, setSessionBusyId] = useState<string>();
-  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([]);
+  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>(
+    initialKnowledgeBaseIds.slice(0, 3),
+  );
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [contextCompacted, setContextCompacted] = useState(
     initialContextCompacted,
@@ -174,6 +186,7 @@ export function ChatWorkspace({
     (conversation) => conversation.id === activeConversationId,
   );
   const isBusy = status === "submitted" || status === "streaming";
+  const assistantName = initialAssistant?.name ?? "Dot";
   const turnCount = messages.filter((message) => message.role === "user").length;
   const turnNumbers = useMemo(() => {
     const result = new Map<string, number>();
@@ -225,7 +238,11 @@ export function ChatWorkspace({
   }, [historyReady, messages, persistenceEnabled]);
 
   useEffect(() => {
-    if (!persistenceEnabled || initialKnowledgeBases.length === 0) return;
+    if (
+      !persistenceEnabled ||
+      initialKnowledgeBases.length === 0 ||
+      initialAssistant
+    ) return;
     const timer = window.setTimeout(() => {
       try {
         const saved = JSON.parse(
@@ -239,7 +256,7 @@ export function ChatWorkspace({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [initialKnowledgeBases, persistenceEnabled]);
+  }, [initialAssistant, initialKnowledgeBases, persistenceEnabled]);
 
   const toggleKnowledgeBase = (knowledgeBaseId: string) => {
     setSelectedKnowledgeBaseIds((current) => {
@@ -634,7 +651,7 @@ export function ChatWorkspace({
         </label>
         <nav className="primary-nav" aria-label="主导航">
           <button className="nav-row is-active"><MessageSquareText size={17} /> 对话 <span>{conversationList.length || 1}</span></button>
-          <button className="nav-row"><Bot size={17} /> 助手</button>
+          <Link className="nav-row" href="/assistants"><Bot size={17} /> 助手</Link>
           <Link className="nav-row" href="/knowledge"><Archive size={17} /> 知识库 <span>{initialKnowledgeBases.length}</span></Link>
           <Link className="nav-row" href="/admin"><Settings2 size={17} /> 模型管理</Link>
         </nav>
@@ -746,7 +763,7 @@ export function ChatWorkspace({
               <article className="message" data-role={message.role} key={message.id}>
                 <div className="message-rail">{message.role === "assistant" ? <BrandMark compact /> : <span className="user-mark">J</span>}</div>
                 <div className="message-body">
-                  <div className="message-meta"><strong>{message.role === "assistant" ? "Dot" : "你"}</strong><span>{message.role === "assistant" ? selectedModel?.name : `第 ${turnNumbers.get(message.id) ?? 1} 轮`}</span></div>
+                  <div className="message-meta"><strong>{message.role === "assistant" ? assistantName : "你"}</strong><span>{message.role === "assistant" ? selectedModel?.name : `第 ${turnNumbers.get(message.id) ?? 1} 轮`}</span></div>
                   <div className="message-content">
                     {message.parts.map((part, partIndex) => part.type === "text" ? <MarkdownContent key={`${message.id}-${partIndex}`}>{part.text}</MarkdownContent> : null)}
                     {isBusy && messageIndex === messages.length - 1 && message.role === "assistant" && <span className="stream-caret" />}
@@ -788,7 +805,7 @@ export function ChatWorkspace({
             <small>{contextCompacted ? "已携带滚动摘要与最近消息" : "自动携带当前会话上下文"}</small>
           </div>
           <form className="composer" onSubmit={handleSubmit}>
-            <textarea ref={composerTextareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="继续提问、修改需求，或让 Dot 完善上面的 Oracle 脚本…" rows={1} aria-label="消息" />
+            <textarea ref={composerTextareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={`继续提问，或让${assistantName}完善上面的结果…`} rows={1} aria-label="消息" />
             <div className="composer-toolbar">
               <div><button type="button" aria-label="添加附件"><Paperclip size={17} /></button><button type="button" className="tool-chip"><Sparkles size={14} /> 深度思考</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> 知识库 {selectedKnowledgeBases.length}</button>}</div>
               {isBusy ? (
@@ -807,7 +824,7 @@ export function ChatWorkspace({
         <section className="inspector-section current-model">
           <p className="eyebrow">CURRENT MODEL</p>
           <div className="current-model-name"><i style={{ background: selectedModel?.accent }} /><span><strong>{selectedModel?.name}</strong><small>{selectedModel?.provider}</small></span></div>
-          <p>{selectedModel?.description}</p>
+          <p>{initialAssistant?.description || selectedModel?.description}</p>
         </section>
         <section className="inspector-section metric-list">
           <div><span><Gauge size={15} /> 上下文窗口</span><strong>{formatContextWindow(selectedModel?.contextWindow ?? 0)}</strong></div>
@@ -859,7 +876,7 @@ export function ChatWorkspace({
         )}
         <section className="inspector-section">
           <div className="section-title"><span>助手指令</span><Settings2 size={15} /></div>
-          <p className="instruction-copy">可靠、简洁且主动。优先给出明确结论，再补充必要解释。</p>
+          <p className="instruction-copy">{initialAssistant ? `当前会话由“${assistantName}”的专用指令驱动。` : "可靠、简洁且主动。优先给出明确结论，再补充必要解释。"}</p>
         </section>
         <section className="inspector-section">
           <div className="section-title"><span>当前能力</span><small>{selectedModel?.capabilities.length}</small></div>

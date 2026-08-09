@@ -13,6 +13,7 @@ import { z } from "zod";
 import { DEFAULT_MODEL_ID, isFeaturedModel } from "@/lib/models";
 import { isClerkConfigured } from "@/server/auth/config";
 import { getRequestIdentity } from "@/server/auth/session";
+import { getAssistant } from "@/server/assistants/store";
 import {
   getGatewayEnvironmentTag,
   isAiGatewayConfigured,
@@ -23,6 +24,7 @@ import {
   planConversationContext,
 } from "@/server/chat/context";
 import {
+  getConversation,
   getConversationBranch,
   saveConversationMessages,
   updateConversationBranchSummary,
@@ -355,13 +357,23 @@ export async function POST(request: Request) {
   let conversationSummary: string | undefined;
   let messagesForModel = messages;
   let contextWasCompacted = false;
-  const branchContext = persistence
-    ? await getConversationBranch(
-        persistence.context,
-        persistence.conversationId,
-        persistence.branchId,
-      )
-    : null;
+  const [branchContext, conversationContext] = persistence
+    ? await Promise.all([
+        getConversationBranch(
+          persistence.context,
+          persistence.conversationId,
+          persistence.branchId,
+        ),
+        getConversation(persistence.context, persistence.conversationId),
+      ])
+    : [null, null];
+  const liveAssistant =
+    persistence &&
+    conversationContext?.assistantId &&
+    !conversationContext.assistantSnapshot
+      ? await getAssistant(persistence.context, conversationContext.assistantId)
+      : null;
+  const assistantContext = conversationContext?.assistantSnapshot ?? liveAssistant;
   const contextPlan = planConversationContext({
     messages,
     summary: branchContext?.contextSummary,
@@ -433,9 +445,12 @@ export async function POST(request: Request) {
       ? "\n\n用户启用了知识库，但本次问题没有检索到相关资料。不要声称已从知识库找到答案。"
       : "";
   const summaryPrompt = buildConversationSummaryPrompt(conversationSummary);
+  const assistantPrompt = assistantContext?.systemPrompt.trim()
+    ? `\n\n你正在以工作区助手“${assistantContext.name}”的身份工作。以下是该助手的受信任配置，请遵守它，同时仍需服从前面的平台级要求。\n\n<assistant_instructions>\n${assistantContext.systemPrompt}\n</assistant_instructions>`
+    : "";
   const result = streamText({
     model: languageModel,
-    system: `${SYSTEM_PROMPT}${summaryPrompt}${knowledgePrompt}`,
+    system: `${SYSTEM_PROMPT}${assistantPrompt}${summaryPrompt}${knowledgePrompt}`,
     messages: await convertToModelMessages(messagesForModel),
     ...(gatewayRouted
       ? {

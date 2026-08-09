@@ -3,7 +3,9 @@ import { ChatWorkspace } from "@/components/chat/chat-workspace";
 import { FEATURED_MODELS } from "@/lib/models";
 import { isClerkConfigured } from "@/server/auth/config";
 import { isAiGatewayConfigured } from "@/server/ai/gateway";
+import { getAssistant } from "@/server/assistants/store";
 import {
+  getConversation,
   listConversations,
   listConversationBranches,
   loadConversationMessages,
@@ -28,8 +30,11 @@ export default async function ConversationPage({
   if (!context) redirect("/sign-in");
 
   const { id } = await params;
-  const branches = await listConversationBranches(context, id);
-  if (!branches) notFound();
+  const [conversation, branches] = await Promise.all([
+    getConversation(context, id),
+    listConversationBranches(context, id),
+  ]);
+  if (!conversation || !branches) notFound();
   const requestedBranchId = (await searchParams).branch;
   const activeBranch = requestedBranchId
     ? branches.find((branch) => branch.id === requestedBranchId)
@@ -37,11 +42,34 @@ export default async function ConversationPage({
   if (!activeBranch) notFound();
   const chatMessages = await loadConversationMessages(context, id, activeBranch.id);
   if (!chatMessages) notFound();
-  const [workspaceModels, knowledgeBases, conversationList] = await Promise.all([
+  const [workspaceModels, knowledgeBases, conversationList, liveAssistant] = await Promise.all([
     listEnabledChatModels(context),
     listKnowledgeBases(context),
     listConversations(context),
+    conversation.assistantId
+      ? getAssistant(context, conversation.assistantId)
+      : Promise.resolve(null),
   ]);
+  const assistant = conversation.assistantSnapshot ?? liveAssistant;
+  const assistantIdentity = assistant
+    ? "assistantId" in assistant
+      ? assistant.assistantId
+      : assistant.id
+    : undefined;
+  const initialMessages = chatMessages.length > 0
+    ? chatMessages
+    : assistant
+      ? [{
+          id: `assistant-welcome-${assistantIdentity}`,
+          role: "assistant" as const,
+          parts: [{
+            type: "text" as const,
+            text:
+              assistant.welcomeMessage ||
+              `你好，我是${assistant.name}。请告诉我你希望完成的任务。`,
+          }],
+        }]
+      : chatMessages;
 
   return (
     <ChatWorkspace
@@ -53,8 +81,14 @@ export default async function ConversationPage({
       initialBranchId={activeBranch.id}
       initialBranches={branches}
       initialContextCompacted={activeBranch.hasContextSummary}
-      initialMessages={chatMessages}
+      initialMessages={initialMessages}
       initialConversations={conversationList}
+      initialModelId={assistant?.defaultModelKey ?? undefined}
+      initialKnowledgeBaseIds={assistant?.knowledgeBaseIds ?? []}
+      initialAssistant={assistant ? {
+        name: assistant.name,
+        description: assistant.description,
+      } : undefined}
       initialKnowledgeBases={knowledgeBases}
     />
   );

@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { ConversationAssistantSnapshot } from "@/lib/assistants";
 import {
   boolean,
   index,
@@ -152,8 +153,11 @@ export const assistants = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    avatar: text("avatar").notNull().default("AI"),
     description: text("description"),
     systemPrompt: text("system_prompt").notNull().default(""),
+    welcomeMessage: text("welcome_message"),
+    defaultModelKey: text("default_model_key"),
     defaultModelId: uuid("default_model_id").references(() => models.id),
     ...timestamps,
   },
@@ -172,6 +176,25 @@ export const knowledgeBases = pgTable(
     ...timestamps,
   },
   (table) => [index("knowledge_bases_workspace_idx").on(table.workspaceId)],
+);
+
+export const assistantKnowledgeBases = pgTable(
+  "assistant_knowledge_bases",
+  {
+    assistantId: uuid("assistant_id")
+      .notNull()
+      .references(() => assistants.id, { onDelete: "cascade" }),
+    knowledgeBaseId: uuid("knowledge_base_id")
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.assistantId, table.knowledgeBaseId] }),
+    index("assistant_knowledge_bases_base_idx").on(table.knowledgeBaseId),
+  ],
 );
 
 export const knowledgeDocuments = pgTable(
@@ -238,6 +261,7 @@ export const conversations = pgTable(
     }),
     title: text("title").notNull().default("新对话"),
     summary: text("summary"),
+    assistantSnapshot: jsonb("assistant_snapshot").$type<ConversationAssistantSnapshot>(),
     archived: boolean("archived").notNull().default(false),
     ...timestamps,
   },

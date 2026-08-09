@@ -6,6 +6,7 @@ import type {
   ConversationBranch,
   ConversationListItem,
 } from "@/lib/conversations";
+import { getAssistant } from "@/server/assistants/store";
 import { getDb } from "@/server/db";
 import {
   conversationBranches,
@@ -52,15 +53,32 @@ export async function listConversations(context: WorkspaceContext) {
 
 export async function createConversation(
   context: WorkspaceContext,
-  title = "新对话",
+  input: { title?: string; assistantId?: string } = {},
 ) {
   const db = getDb();
+  const assistant = input.assistantId
+    ? await getAssistant(context, input.assistantId)
+    : null;
+  if (input.assistantId && !assistant) return null;
   const [conversation] = await db
     .insert(conversations)
     .values({
       workspaceId: context.workspaceId,
       userId: context.userId,
-      title,
+      assistantId: assistant?.id,
+      assistantSnapshot: assistant
+        ? {
+            assistantId: assistant.id,
+            name: assistant.name,
+            avatar: assistant.avatar,
+            description: assistant.description,
+            systemPrompt: assistant.systemPrompt,
+            welcomeMessage: assistant.welcomeMessage,
+            defaultModelKey: assistant.defaultModelKey,
+            knowledgeBaseIds: assistant.knowledgeBaseIds,
+          }
+        : undefined,
+      title: input.title || "新对话",
     })
     .returning({ id: conversations.id, title: conversations.title });
 
