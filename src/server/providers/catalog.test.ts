@@ -40,6 +40,26 @@ describe("parseProviderCatalog", () => {
 
     expect(result[0]?.contextWindow).toBe(200000);
   });
+
+  it("normalizes ZenMux display and capability fields", () => {
+    const result = parseProviderCatalog({
+      data: [
+        {
+          id: "anthropic/claude-sonnet",
+          display_name: "Anthropic: Claude Sonnet",
+          context_length: 200000,
+          input_modalities: ["text", "image", "file"],
+          capabilities: { reasoning: true },
+        },
+      ],
+    });
+
+    expect(result[0]).toMatchObject({
+      name: "Anthropic: Claude Sonnet",
+      contextWindow: 200000,
+      capabilities: ["text", "image", "files", "reasoning"],
+    });
+  });
 });
 
 describe("provider URL safety", () => {

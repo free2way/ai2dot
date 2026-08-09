@@ -27,7 +27,7 @@ npm run db:migrate
 
 ## 模型供应商后台
 
-访问 `/admin` 管理供应商连接。内置 OpenAI、OpenRouter、DeepSeek 与自定义 OpenAI-compatible 快捷模板；API Key 使用 AES-256-GCM 加密后入库。
+访问 `/admin` 管理供应商连接。内置 OpenAI、OpenRouter、DeepSeek、ZenMux 与自定义 OpenAI-compatible 快捷模板；API Key 使用 AES-256-GCM 加密后入库。
 
 生成加密密钥：
 

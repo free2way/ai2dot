@@ -10,10 +10,16 @@ const catalogResponseSchema = z.object({
       .object({
         id: z.string().min(1),
         name: z.string().optional(),
+        display_name: z.string().optional(),
         description: z.string().optional(),
         context_window: z.number().int().positive().optional(),
         context_length: z.number().int().positive().optional(),
         max_model_len: z.number().int().positive().optional(),
+        input_modalities: z.array(z.string()).optional(),
+        capabilities: z
+          .object({ reasoning: z.boolean().optional() })
+          .passthrough()
+          .optional(),
         pricing: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
         architecture: z
           .object({ input_modalities: z.array(z.string()).optional() })
@@ -106,16 +112,18 @@ export function parseProviderCatalog(payload: unknown): DiscoveredModel[] {
   const parsed = catalogResponseSchema.parse(payload);
 
   return parsed.data.map((model) => {
-    const inputModalities = model.architecture?.input_modalities ?? ["text"];
+    const inputModalities =
+      model.architecture?.input_modalities ?? model.input_modalities ?? ["text"];
     const capabilities = new Set<string>(["text"]);
     if (inputModalities.includes("image")) capabilities.add("image");
     if (inputModalities.some((item) => ["file", "pdf", "document"].includes(item))) {
       capabilities.add("files");
     }
+    if (model.capabilities?.reasoning) capabilities.add("reasoning");
 
     return {
       id: model.id,
-      name: model.name || titleFromId(model.id),
+      name: model.name || model.display_name || titleFromId(model.id),
       description: model.description,
       contextWindow:
         model.context_window ?? model.context_length ?? model.max_model_len,

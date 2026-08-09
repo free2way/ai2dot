@@ -92,6 +92,13 @@ const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     description: "DeepSeek 对话与推理模型",
   },
   {
+    id: "zenmux",
+    name: "ZenMux",
+    shortName: "ZM",
+    baseUrl: "https://zenmux.ai/api/v1",
+    description: "统一接入全球主流模型",
+  },
+  {
     id: "custom",
     name: "自定义接口",
     shortName: "API",
@@ -156,7 +163,7 @@ export function ProviderManager({
     );
   };
 
-  const openCreate = (template = PROVIDER_TEMPLATES[3]) => {
+  const openCreate = (template = PROVIDER_TEMPLATES.at(-1)!) => {
     if (!infrastructureReady) return;
     setEditingId(undefined);
     setFormState({
