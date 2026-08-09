@@ -22,6 +22,13 @@
       "when": 1786280441974,
       "tag": "0002_dear_abomination",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786282719709,
+      "tag": "0003_salty_phil_sheldon",
+      "breakpoints": true
     }
   ]
 }

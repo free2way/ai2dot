@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { UIMessage } from "ai";
 import type {
   ConversationBranch,
@@ -194,6 +194,7 @@ export async function listConversationBranches(
         conversationBranches.forkedFromClientMessageId,
       name: conversationBranches.name,
       isDefault: conversationBranches.isDefault,
+      hasContextSummary: isNotNull(conversationBranches.contextSummary),
       createdAt: conversationBranches.createdAt,
       messageCount: count(messages.id),
     })
@@ -205,6 +206,7 @@ export async function listConversationBranches(
 
   return rows.map((row) => ({
     ...row,
+    hasContextSummary: Boolean(row.hasContextSummary),
     createdAt: row.createdAt.toISOString(),
     messageCount: Number(row.messageCount),
   }));
@@ -298,6 +300,40 @@ export async function saveConversationMessages({
   return branch;
 }
 
+export async function updateConversationBranchSummary({
+  context,
+  conversationId,
+  branchId,
+  summary,
+  throughClientMessageId,
+}: {
+  context: WorkspaceContext;
+  conversationId: string;
+  branchId: string;
+  summary: string;
+  throughClientMessageId: string;
+}) {
+  const conversation = await getConversation(context, conversationId);
+  if (!conversation) return null;
+
+  const [updated] = await getDb()
+    .update(conversationBranches)
+    .set({
+      contextSummary: summary,
+      summaryThroughClientMessageId: throughClientMessageId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(conversationBranches.id, branchId),
+        eq(conversationBranches.conversationId, conversationId),
+      ),
+    )
+    .returning({ id: conversationBranches.id });
+
+  return updated ?? null;
+}
+
 export async function forkConversationBranch({
   context,
   conversationId,
@@ -367,6 +403,7 @@ export async function forkConversationBranch({
       forkedFromClientMessageId: branch.forkedFromClientMessageId,
       name: branch.name,
       isDefault: branch.isDefault,
+      hasContextSummary: false,
       createdAt: branch.createdAt.toISOString(),
       messageCount: prefix.length,
     } satisfies ConversationBranch,

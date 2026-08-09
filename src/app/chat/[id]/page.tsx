@@ -52,6 +52,7 @@ export default async function ConversationPage({
       initialConversationId={id}
       initialBranchId={activeBranch.id}
       initialBranches={branches}
+      initialContextCompacted={activeBranch.hasContextSummary}
       initialMessages={chatMessages}
       initialConversations={conversationList}
       initialKnowledgeBases={knowledgeBases}

@@ -261,6 +261,10 @@ export const conversationBranches = pgTable(
     forkedFromClientMessageId: text("forked_from_client_message_id"),
     name: text("name").notNull().default("主分支"),
     isDefault: boolean("is_default").notNull().default(false),
+    contextSummary: text("context_summary"),
+    summaryThroughClientMessageId: text(
+      "summary_through_client_message_id",
+    ),
     ...timestamps,
   },
   (table) => [

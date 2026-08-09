@@ -17,7 +17,17 @@ import {
   getGatewayEnvironmentTag,
   isAiGatewayConfigured,
 } from "@/server/ai/gateway";
-import { saveConversationMessages } from "@/server/chat/store";
+import {
+  buildConversationSummaryPrompt,
+  createFallbackSummary,
+  planConversationContext,
+} from "@/server/chat/context";
+import {
+  getConversationBranch,
+  saveConversationMessages,
+  updateConversationBranchSummary,
+} from "@/server/chat/store";
+import { summarizeConversationContext } from "@/server/chat/summarize";
 import { getDb } from "@/server/db";
 import { usageEvents } from "@/server/db/schema";
 import {
@@ -39,7 +49,7 @@ import { resolveChatModel } from "@/server/providers/store";
 export const maxDuration = 60;
 
 const chatRequestSchema = z.object({
-  messages: z.array(z.custom<UIMessage>()).min(1).max(200),
+  messages: z.array(z.custom<UIMessage>()).min(1).max(1000),
   modelId: z.string().min(1).max(120).optional(),
   conversationId: z.string().uuid().optional(),
   branchId: z.string().uuid().optional(),
@@ -342,6 +352,53 @@ export async function POST(request: Request) {
     });
   };
 
+  let conversationSummary: string | undefined;
+  let messagesForModel = messages;
+  let contextWasCompacted = false;
+  const branchContext = persistence
+    ? await getConversationBranch(
+        persistence.context,
+        persistence.conversationId,
+        persistence.branchId,
+      )
+    : null;
+  const contextPlan = planConversationContext({
+    messages,
+    summary: branchContext?.contextSummary,
+    summaryThroughClientMessageId:
+      branchContext?.summaryThroughClientMessageId,
+  });
+  conversationSummary = contextPlan.previousSummary;
+  messagesForModel = contextPlan.messagesForModel;
+
+  if (
+    contextPlan.shouldCompact &&
+    contextPlan.compactedThroughClientMessageId
+  ) {
+    conversationSummary = modelAvailable
+      ? await summarizeConversationContext({
+          model: languageModel,
+          previousSummary: contextPlan.previousSummary,
+          messages: contextPlan.messagesToSummarize,
+        })
+      : createFallbackSummary(
+          contextPlan.previousSummary,
+          contextPlan.messagesToSummarize,
+        );
+    contextWasCompacted = true;
+
+    if (persistence) {
+      await updateConversationBranchSummary({
+        context: persistence.context,
+        conversationId: persistence.conversationId,
+        branchId: persistence.branchId,
+        summary: conversationSummary,
+        throughClientMessageId:
+          contextPlan.compactedThroughClientMessageId,
+      });
+    }
+  }
+
   if (!modelAvailable) {
     const prompt = getLatestUserText(messages);
     const demoText = prompt
@@ -375,10 +432,11 @@ export async function POST(request: Request) {
     : parsed.data.knowledgeBaseIds.length > 0
       ? "\n\n用户启用了知识库，但本次问题没有检索到相关资料。不要声称已从知识库找到答案。"
       : "";
+  const summaryPrompt = buildConversationSummaryPrompt(conversationSummary);
   const result = streamText({
     model: languageModel,
-    system: `${SYSTEM_PROMPT}${knowledgePrompt}`,
-    messages: await convertToModelMessages(messages),
+    system: `${SYSTEM_PROMPT}${summaryPrompt}${knowledgePrompt}`,
+    messages: await convertToModelMessages(messagesForModel),
     ...(gatewayRouted
       ? {
           providerOptions: {
@@ -435,6 +493,7 @@ export async function POST(request: Request) {
       ...(persistence
         ? { "x-ai2dot-generation-id": persistence.generation.id }
         : {}),
+      "x-ai2dot-context-compacted": String(contextWasCompacted),
     },
   });
 }

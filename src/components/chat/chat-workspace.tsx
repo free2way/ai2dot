@@ -4,9 +4,11 @@ import { useChat } from "@ai-sdk/react";
 import { Show, UserButton } from "@clerk/nextjs";
 import {
   Archive,
+  ArrowDown,
   ArrowUp,
   BookPlus,
   Bot,
+  BrainCircuit,
   Check,
   ChevronDown,
   CircleHelp,
@@ -89,6 +91,7 @@ type ChatWorkspaceProps = {
   initialMessages?: UIMessage[];
   initialConversations?: ConversationListItem[];
   initialBranches?: ConversationBranch[];
+  initialContextCompacted?: boolean;
   initialKnowledgeBases?: KnowledgeBaseSummary[];
 };
 
@@ -111,6 +114,7 @@ export function ChatWorkspace({
   initialMessages = WELCOME_MESSAGES,
   initialConversations = [],
   initialBranches = [],
+  initialContextCompacted = false,
   initialKnowledgeBases = [],
 }: ChatWorkspaceProps) {
   const router = useRouter();
@@ -132,7 +136,12 @@ export function ChatWorkspace({
   const [renameValue, setRenameValue] = useState("");
   const [sessionBusyId, setSessionBusyId] = useState<string>();
   const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([]);
-  const endRef = useRef<HTMLDivElement>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [contextCompacted, setContextCompacted] = useState(
+    initialContextCompacted,
+  );
+  const conversationScrollRef = useRef<HTMLDivElement>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const {
     messages,
@@ -165,6 +174,33 @@ export function ChatWorkspace({
     (conversation) => conversation.id === activeConversationId,
   );
   const isBusy = status === "submitted" || status === "streaming";
+  const turnCount = messages.filter((message) => message.role === "user").length;
+  const turnNumbers = useMemo(() => {
+    const result = new Map<string, number>();
+    let currentTurn = 0;
+    for (const message of messages) {
+      if (message.role === "user") currentTurn += 1;
+      result.set(message.id, currentTurn);
+    }
+    return result;
+  }, [messages]);
+  const estimatedContextCharacters = useMemo(
+    () => messages.reduce(
+      (total, message) =>
+        total +
+        message.parts.reduce(
+          (partTotal, part) =>
+            partTotal + (part.type === "text" ? part.text.length : 0),
+          0,
+        ),
+      0,
+    ),
+    [messages],
+  );
+  const estimatedContextTokens = Math.max(
+    1,
+    Math.ceil(estimatedContextCharacters / 3),
+  ).toLocaleString("zh-CN");
 
   useEffect(() => {
     if (persistenceEnabled) {
@@ -216,8 +252,36 @@ export function ChatWorkspace({
   };
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, status]);
+    const textarea = composerTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 42), 160);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
+  }, [input]);
+
+  useEffect(() => {
+    if (!isNearBottom && status !== "submitted") return;
+    const frame = window.requestAnimationFrame(() => {
+      const scroll = conversationScrollRef.current;
+      scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isNearBottom, messages, status]);
+
+  const handleConversationScroll = () => {
+    const scroll = conversationScrollRef.current;
+    if (!scroll) return;
+    const distanceFromBottom =
+      scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
+    setIsNearBottom(distanceFromBottom < 96);
+  };
+
+  const scrollToBottom = () => {
+    setIsNearBottom(true);
+    const scroll = conversationScrollRef.current;
+    scroll?.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+  };
 
   const createCloudConversation = async () => {
     const response = await fetch("/api/conversations", {
@@ -247,6 +311,7 @@ export function ChatWorkspace({
         forkedFromClientMessageId: null,
         name: "主分支",
         isDefault: true,
+        hasContextSummary: false,
         createdAt: new Date().toISOString(),
         messageCount: 0,
       },
@@ -260,6 +325,7 @@ export function ChatWorkspace({
     if (!value || isBusy) return;
     clearError();
     setCloudError(undefined);
+    setIsNearBottom(true);
 
     try {
       const created =
@@ -281,6 +347,12 @@ export function ChatWorkspace({
           },
         },
       );
+      if (
+        messages.length + 1 > 18 ||
+        estimatedContextCharacters + value.length > 28_000
+      ) {
+        setContextCompacted(true);
+      }
       if (conversationId) {
         setConversationList((items) => {
           const current = items.find((item) => item.id === conversationId);
@@ -344,10 +416,18 @@ export function ChatWorkspace({
         `/api/conversations/${activeConversationId}?branch=${encodeURIComponent(branchId)}`,
       );
       if (!response.ok) throw new Error("分支加载失败。");
-      const payload = (await response.json()) as { messages: UIMessage[] };
+      const payload = (await response.json()) as {
+        messages: UIMessage[];
+        branches?: ConversationBranch[];
+      };
       stop();
       setMessages(payload.messages);
       setActiveBranchId(branchId);
+      setContextCompacted(
+        payload.branches?.find((branch) => branch.id === branchId)
+          ?.hasContextSummary ?? false,
+      );
+      setIsNearBottom(true);
       window.history.replaceState(
         null,
         "",
@@ -650,14 +730,23 @@ export function ChatWorkspace({
           </div>
         </header>
 
-        <div className="conversation-scroll">
-          <div className="conversation-inner">
+        <div className="conversation-viewport">
+          <div
+            className="conversation-scroll"
+            onScroll={handleConversationScroll}
+            ref={conversationScrollRef}
+          >
+            <div className="conversation-inner">
             <div className="conversation-date">今天</div>
+            <div className="conversation-context-strip">
+              <span><MessageSquareText size={13} /> {turnCount} 轮对话</span>
+              <span><BrainCircuit size={13} /> {contextCompacted ? "较早内容已压缩" : "上下文自动管理"}</span>
+            </div>
             {messages.map((message, messageIndex) => (
               <article className="message" data-role={message.role} key={message.id}>
                 <div className="message-rail">{message.role === "assistant" ? <BrandMark compact /> : <span className="user-mark">J</span>}</div>
                 <div className="message-body">
-                  <div className="message-meta"><strong>{message.role === "assistant" ? "Dot" : "你"}</strong><span>{message.role === "assistant" ? selectedModel?.name : "刚刚"}</span></div>
+                  <div className="message-meta"><strong>{message.role === "assistant" ? "Dot" : "你"}</strong><span>{message.role === "assistant" ? selectedModel?.name : `第 ${turnNumbers.get(message.id) ?? 1} 轮`}</span></div>
                   <div className="message-content">
                     {message.parts.map((part, partIndex) => part.type === "text" ? <MarkdownContent key={`${message.id}-${partIndex}`}>{part.text}</MarkdownContent> : null)}
                     {isBusy && messageIndex === messages.length - 1 && message.role === "assistant" && <span className="stream-caret" />}
@@ -680,13 +769,26 @@ export function ChatWorkspace({
             )}
             {error && <div className="chat-error" role="alert"><CircleHelp size={17} /><span>{error.message || "请求失败，请稍后重试。"}</span><button onClick={clearError}>关闭</button></div>}
             {cloudError && <div className="chat-error" role="alert"><CircleHelp size={17} /><span>{cloudError}</span><button onClick={() => setCloudError(undefined)}>关闭</button></div>}
-            <div ref={endRef} />
+            </div>
           </div>
+          {!isNearBottom && (
+            <button
+              className="scroll-to-bottom"
+              onClick={scrollToBottom}
+              type="button"
+            >
+              <ArrowDown size={15} /> 回到底部
+            </button>
+          )}
         </div>
 
         <footer className="composer-dock">
+          <div className="composer-session-label">
+            <span>继续这个会话</span>
+            <small>{contextCompacted ? "已携带滚动摘要与最近消息" : "自动携带当前会话上下文"}</small>
+          </div>
           <form className="composer" onSubmit={handleSubmit}>
-            <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="给 Dot 发消息…" rows={1} aria-label="消息" />
+            <textarea ref={composerTextareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="继续提问、修改需求，或让 Dot 完善上面的 Oracle 脚本…" rows={1} aria-label="消息" />
             <div className="composer-toolbar">
               <div><button type="button" aria-label="添加附件"><Paperclip size={17} /></button><button type="button" className="tool-chip"><Sparkles size={14} /> 深度思考</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> 知识库 {selectedKnowledgeBases.length}</button>}</div>
               {isBusy ? (
@@ -709,7 +811,8 @@ export function ChatWorkspace({
         </section>
         <section className="inspector-section metric-list">
           <div><span><Gauge size={15} /> 上下文窗口</span><strong>{formatContextWindow(selectedModel?.contextWindow ?? 0)}</strong></div>
-          <div><span><Clock3 size={15} /> 本次上下文</span><strong>{Math.max(messages.length * 84, 312)} tokens</strong></div>
+          <div><span><Clock3 size={15} /> 会话估算</span><strong>约 {estimatedContextTokens} tokens</strong></div>
+          <div><span><BrainCircuit size={15} /> 历史管理</span><strong>{contextCompacted ? "滚动摘要" : "完整上下文"}</strong></div>
           <div><span><Zap size={15} /> 连接状态</span><strong>{gatewayEnabled ? "实时" : "演示"}</strong></div>
         </section>
         {persistenceEnabled && branches.length > 0 && (

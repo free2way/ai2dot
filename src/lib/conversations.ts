@@ -12,6 +12,7 @@ export type ConversationBranch = {
   forkedFromClientMessageId: string | null;
   name: string;
   isDefault: boolean;
+  hasContextSummary: boolean;
   createdAt: string;
   messageCount: number;
 };
