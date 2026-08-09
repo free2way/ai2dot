@@ -10,7 +10,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-打开 `http://localhost:3000`。Vercel 部署默认使用自动轮换的 OIDC 调用 AI Gateway；本地执行 `vercel env pull .env.local --yes` 获取短期 OIDC Token。非 Vercel 环境也可以配置 `AI_GATEWAY_API_KEY`，两种认证都不可用时自动使用演示流。
+打开 `http://localhost:3000`。默认使用演示流；登录后可在 `/admin` 添加自己的 OpenAI-compatible 模型供应商和 API Key。Vercel AI Gateway 默认关闭，只有显式配置 `AI_GATEWAY_API_KEY`，或同时设置 `AI2DOT_ENABLE_AI_GATEWAY=true` 与 OIDC 时才会启用。
 
 ## 云端会话与登录
 
@@ -27,7 +27,7 @@ npm run db:migrate
 
 ## 模型供应商后台
 
-访问 `/admin` 管理供应商连接。支持 Vercel AI Gateway、OpenAI-compatible 与 Native API 模型目录；API Key 使用 AES-256-GCM 加密后入库。
+访问 `/admin` 管理供应商连接。内置 OpenAI、OpenRouter、DeepSeek 与自定义 OpenAI-compatible 快捷模板；API Key 使用 AES-256-GCM 加密后入库。
 
 生成加密密钥：
 
@@ -39,7 +39,7 @@ openssl rand -base64 32
 
 ## 环境服务
 
-- AI：Vercel AI Gateway
+- AI：工作区自带的 OpenAI-compatible 供应商；Vercel AI Gateway 为可选能力
 - Auth：Clerk（两项 Clerk key 同时配置后启用）
 - Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型）
 - Cache/Rate limit：Upstash Redis（下一阶段接入）

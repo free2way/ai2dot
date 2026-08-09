@@ -3,7 +3,11 @@ import "server-only";
 export type GatewayAuthMode = "api-key" | "oidc" | "unconfigured";
 type GatewayEnvironment = Pick<
   NodeJS.ProcessEnv,
-  "AI_GATEWAY_API_KEY" | "VERCEL_OIDC_TOKEN" | "VERCEL_ENV" | "NODE_ENV"
+  | "AI_GATEWAY_API_KEY"
+  | "AI2DOT_ENABLE_AI_GATEWAY"
+  | "VERCEL_OIDC_TOKEN"
+  | "VERCEL_ENV"
+  | "NODE_ENV"
 >;
 
 export function getGatewayAuthMode(
@@ -17,7 +21,11 @@ export function getGatewayAuthMode(
 export function isAiGatewayConfigured(
   environment: Partial<GatewayEnvironment> = process.env,
 ) {
-  return getGatewayAuthMode(environment) !== "unconfigured";
+  const mode = getGatewayAuthMode(environment);
+  return (
+    mode === "api-key" ||
+    (mode === "oidc" && environment.AI2DOT_ENABLE_AI_GATEWAY === "true")
+  );
 }
 
 export function getGatewayEnvironmentTag(

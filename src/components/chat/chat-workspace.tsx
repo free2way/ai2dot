@@ -417,7 +417,7 @@ export function ChatWorkspace({
             <button className="icon-button mobile-only" onClick={() => setSidebarOpen(true)} aria-label="打开会话栏">
               <Menu size={19} />
             </button>
-            <div><p>新对话</p><span><i className={gatewayEnabled ? "status-live" : "status-demo"} />{gatewayEnabled ? "AI Gateway 已连接" : "演示模式"}</span></div>
+            <div><p>新对话</p><span><i className={gatewayEnabled ? "status-live" : "status-demo"} />{gatewayEnabled ? "模型服务已连接" : "演示模式"}</span></div>
           </div>
           <div className="header-actions">
             <div className="model-picker">
@@ -534,7 +534,7 @@ export function ChatWorkspace({
           <div className="section-title"><span>当前能力</span><small>{selectedModel?.capabilities.length}</small></div>
           <div className="capability-list">{selectedModel?.capabilities.map((capability) => <span key={capability}><Check size={12} /> {capability}</span>)}</div>
         </section>
-        <div className="inspector-note"><span className={gatewayEnabled ? "status-live" : "status-demo"} /><p>{gatewayEnabled ? "请求通过 Vercel AI Gateway OIDC 安全转发。" : authEnabled ? "登录后即可使用真实模型。" : "连接 Vercel OIDC 或 Gateway API Key 后启用真实模型。"}</p></div>
+        <div className="inspector-note"><span className={gatewayEnabled ? "status-live" : "status-demo"} /><p>{gatewayEnabled ? "请求通过工作区配置的模型供应商安全转发。" : authEnabled ? "前往模型管理，添加自己的 API Key 后启用真实模型。" : "登录后可配置自己的模型供应商。"}</p></div>
       </aside>
     </main>
   );

@@ -19,8 +19,9 @@ export default async function Home() {
       models={workspaceModels.length > 0 ? workspaceModels : FEATURED_MODELS}
       authEnabled={isClerkConfigured()}
       gatewayEnabled={
-        isAiGatewayConfigured() &&
-        (!isClerkConfigured() || Boolean(identity))
+        workspaceModels.length > 0 ||
+        (isAiGatewayConfigured() &&
+          (!isClerkConfigured() || Boolean(identity)))
       }
       persistenceEnabled={Boolean(context)}
       initialConversations={conversationList}

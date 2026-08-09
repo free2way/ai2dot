@@ -3,16 +3,22 @@
 import {
   ArrowLeft,
   Check,
+  CloudCog,
   Database,
+  Eye,
+  EyeOff,
   KeyRound,
+  Pencil,
   Plus,
   RefreshCw,
+  Search,
   ServerCog,
   ShieldCheck,
+  Trash2,
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { BrandMark } from "@/components/brand-mark";
 
 type ProviderSummary = {
@@ -28,6 +34,7 @@ type ProviderSummary = {
 
 type ProviderModelSummary = {
   id: string;
+  connectionId: string;
   providerModelId: string;
   name: string;
   connectionName: string;
@@ -39,7 +46,6 @@ type ProviderModelSummary = {
 type Props = {
   infrastructureReady: boolean;
   configuration: {
-    gatewayReady: boolean;
     authReady: boolean;
     databaseReady: boolean;
     encryptionReady: boolean;
@@ -48,10 +54,57 @@ type Props = {
   initialModels?: ProviderModelSummary[];
 };
 
-const PROVIDER_LABELS = {
-  gateway: "Vercel AI Gateway",
-  openai_compatible: "OpenAI Compatible",
-  native: "Native API",
+type ProviderTemplate = {
+  id: string;
+  name: string;
+  shortName: string;
+  baseUrl: string;
+  description: string;
+};
+
+type ProviderForm = {
+  name: string;
+  baseUrl: string;
+  secret: string;
+  enabled: boolean;
+};
+
+const PROVIDER_TEMPLATES: ProviderTemplate[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    shortName: "OA",
+    baseUrl: "https://api.openai.com/v1",
+    description: "GPT 与 o 系列模型",
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    shortName: "OR",
+    baseUrl: "https://openrouter.ai/api/v1",
+    description: "一个密钥连接多家模型",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    shortName: "DS",
+    baseUrl: "https://api.deepseek.com",
+    description: "DeepSeek 对话与推理模型",
+  },
+  {
+    id: "custom",
+    name: "自定义接口",
+    shortName: "API",
+    baseUrl: "",
+    description: "任意 OpenAI-compatible 服务",
+  },
+];
+
+const EMPTY_FORM: ProviderForm = {
+  name: "",
+  baseUrl: "",
+  secret: "",
+  enabled: true,
 };
 
 export function ProviderManager({
@@ -62,9 +115,30 @@ export function ProviderManager({
 }: Props) {
   const [providers, setProviders] = useState(initialProviders);
   const [models, setModels] = useState(initialModels);
+  const [selectedProviderId, setSelectedProviderId] = useState(
+    initialProviders[0]?.id,
+  );
+  const [editingId, setEditingId] = useState<string>();
   const [formOpen, setFormOpen] = useState(false);
+  const [formState, setFormState] = useState<ProviderForm>(EMPTY_FORM);
+  const [showSecret, setShowSecret] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
   const [busyId, setBusyId] = useState<string>();
   const [notice, setNotice] = useState<string>();
+
+  const selectedProvider =
+    providers.find((provider) => provider.id === selectedProviderId) ??
+    providers[0];
+  const visibleModels = useMemo(() => {
+    const query = modelSearch.trim().toLowerCase();
+    return models.filter(
+      (model) =>
+        (!selectedProvider || model.connectionId === selectedProvider.id) &&
+        (!query ||
+          model.name.toLowerCase().includes(query) ||
+          model.providerModelId.toLowerCase().includes(query)),
+    );
+  }, [modelSearch, models, selectedProvider]);
 
   const refreshProviders = async () => {
     const response = await fetch("/api/admin/providers", { cache: "no-store" });
@@ -75,40 +149,41 @@ export function ProviderManager({
     };
     setProviders(payload.providers);
     setModels(payload.models);
+    setSelectedProviderId((current) =>
+      payload.providers.some((provider) => provider.id === current)
+        ? current
+        : payload.providers[0]?.id,
+    );
   };
 
-  const createProvider = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusyId("create");
-    setNotice(undefined);
-    const form = new FormData(event.currentTarget);
-
-    try {
-      const response = await fetch("/api/admin/providers", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: form.get("name"),
-          type: form.get("type"),
-          baseUrl: form.get("baseUrl"),
-          secret: form.get("secret"),
-        }),
-      });
-      const payload = (await response.json()) as { message?: string };
-      if (!response.ok) throw new Error(payload.message || "供应商保存失败。");
-      await refreshProviders();
-      setFormOpen(false);
-      setNotice("供应商已保存，可以开始刷新模型目录。");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "供应商保存失败。");
-    } finally {
-      setBusyId(undefined);
-    }
+  const openCreate = (template = PROVIDER_TEMPLATES[3]) => {
+    if (!infrastructureReady) return;
+    setEditingId(undefined);
+    setFormState({
+      name: template.name === "自定义接口" ? "" : template.name,
+      baseUrl: template.baseUrl,
+      secret: "",
+      enabled: true,
+    });
+    setShowSecret(false);
+    setFormOpen(true);
   };
 
-  const syncProvider = async (providerId: string) => {
+  const openEdit = (provider: ProviderSummary) => {
+    setEditingId(provider.id);
+    setFormState({
+      name: provider.name,
+      baseUrl: provider.baseUrl ?? "",
+      secret: "",
+      enabled: provider.enabled,
+    });
+    setShowSecret(false);
+    setFormOpen(true);
+  };
+
+  const syncProvider = async (providerId: string, quiet = false) => {
     setBusyId(providerId);
-    setNotice(undefined);
+    if (!quiet) setNotice(undefined);
     try {
       const response = await fetch(`/api/admin/providers/${providerId}/sync`, {
         method: "POST",
@@ -117,11 +192,73 @@ export function ProviderManager({
         discovered?: number;
         message?: string;
       };
-      if (!response.ok) throw new Error(payload.message || "目录刷新失败。");
+      if (!response.ok) throw new Error(payload.message || "连接测试失败。");
       await refreshProviders();
-      setNotice(`目录刷新完成，发现 ${payload.discovered ?? 0} 个模型。`);
+      setSelectedProviderId(providerId);
+      setNotice(`连接正常，已同步 ${payload.discovered ?? 0} 个模型。`);
+      return true;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "目录刷新失败。");
+      setNotice(
+        error instanceof Error
+          ? `${quiet ? "配置已保存，但" : ""}连接测试失败：${error.message}`
+          : "连接测试失败。",
+      );
+      return false;
+    } finally {
+      setBusyId(undefined);
+    }
+  };
+
+  const saveProvider = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusyId("save");
+    setNotice(undefined);
+
+    try {
+      const response = await fetch(
+        editingId ? `/api/admin/providers/${editingId}` : "/api/admin/providers",
+        {
+          method: editingId ? "PATCH" : "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(
+            editingId
+              ? formState
+              : { ...formState, type: "openai_compatible" },
+          ),
+        },
+      );
+      const payload = (await response.json()) as {
+        connection?: { id: string };
+        message?: string;
+      };
+      if (!response.ok) throw new Error(payload.message || "供应商保存失败。");
+
+      const providerId = editingId ?? payload.connection?.id;
+      setFormOpen(false);
+      await refreshProviders();
+      if (providerId) await syncProvider(providerId, true);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "供应商保存失败。");
+    } finally {
+      setBusyId(undefined);
+    }
+  };
+
+  const deleteProvider = async (provider: ProviderSummary) => {
+    if (!window.confirm(`删除“${provider.name}”及其全部模型？此操作无法撤销。`)) {
+      return;
+    }
+    setBusyId(provider.id);
+    setNotice(undefined);
+    try {
+      const response = await fetch(`/api/admin/providers/${provider.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("供应商删除失败。");
+      await refreshProviders();
+      setNotice(`已删除供应商“${provider.name}”。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "供应商删除失败。");
     } finally {
       setBusyId(undefined);
     }
@@ -161,84 +298,111 @@ export function ProviderManager({
           <div>
             <p className="eyebrow">MODEL OPERATIONS</p>
             <h1>模型供应商</h1>
-            <p>集中管理连接凭据、模型发现与可用状态。</p>
+            <p>使用自己的 API Key 直连模型服务，不依赖 Vercel AI Gateway。</p>
           </div>
-          {infrastructureReady && (
-            <button className="admin-primary" onClick={() => setFormOpen(true)}>
-              <Plus size={16} /> 添加供应商
-            </button>
-          )}
+          <button
+            className="admin-primary"
+            disabled={!infrastructureReady}
+            onClick={() => openCreate()}
+            title={infrastructureReady ? undefined : "请先完成下方基础配置"}
+          >
+            <Plus size={16} /> 添加供应商
+          </button>
         </div>
 
-        {!infrastructureReady ? (
-          <section className="admin-setup-panel">
-            <div className="setup-copy">
-              <span className="setup-icon"><ServerCog size={24} /></span>
-              <p className="eyebrow">MODEL INFRASTRUCTURE</p>
-              <h2>{configuration.gatewayReady ? "AI Gateway 已连接" : "等待连接模型网关"}</h2>
-              <p>{configuration.gatewayReady ? "三款默认模型已经可以通过 OIDC 调用。连接数据库后，即可持久化自定义供应商、在线刷新目录并按工作区启停模型。" : "完成下面的云服务配置后，供应商密钥将加密入库，模型目录可以随时在线刷新。"}</p>
+        {!infrastructureReady && (
+          <section className="admin-readiness" aria-label="基础配置状态">
+            <div className="admin-readiness-copy">
+              <span><CloudCog size={21} /></span>
+              <div><strong>管理界面已就绪</strong><small>完成缺失的基础配置后，即可安全保存 API Key。</small></div>
             </div>
-            <div className="setup-checklist">
-              <div data-ready={configuration.gatewayReady}><ServerCog size={18} /><span><strong>Vercel AI Gateway</strong><small>{configuration.gatewayReady ? "OIDC 已连接，默认模型可用" : "启用 Gateway OIDC 或配置 API Key"}</small></span></div>
-              <div data-ready={configuration.authReady}><ShieldCheck size={18} /><span><strong>Clerk Authentication</strong><small>{configuration.authReady ? "登录与管理员鉴权已启用" : "配置 publishable key 与 secret key"}</small></span></div>
-              <div data-ready={configuration.databaseReady}><Database size={18} /><span><strong>Neon PostgreSQL</strong><small>{configuration.databaseReady ? "模型目录与工作区存储已连接" : "配置 DATABASE_URL 并运行数据库迁移"}</small></span></div>
-              <div data-ready={configuration.encryptionReady}><KeyRound size={18} /><span><strong>AES-256 encryption</strong><small>{configuration.encryptionReady ? "供应商凭据加密密钥已配置" : "生成 PROVIDER_SECRET_ENCRYPTION_KEY"}</small></span></div>
+            <div className="admin-readiness-items">
+              <div data-ready={configuration.authReady}><ShieldCheck size={15} /> 登录鉴权</div>
+              <div data-ready={configuration.databaseReady}><Database size={15} /> 配置存储</div>
+              <div data-ready={configuration.encryptionReady}><KeyRound size={15} /> 密钥加密</div>
             </div>
-            {!configuration.encryptionReady && <code>openssl rand -base64 32</code>}
           </section>
-        ) : (
-          <>
-            <section className="admin-metrics">
-              <div><small>供应商</small><strong>{providers.length}</strong></div>
-              <div><small>已启用模型</small><strong>{models.filter((model) => model.enabled).length} / {models.length}</strong></div>
-              <div><small>凭据策略</small><strong>AES-256</strong></div>
-            </section>
-
-            <section className="provider-table" aria-label="供应商列表">
-              <div className="provider-table-head"><span>连接</span><span>目录状态</span><span>安全</span><span /></div>
-              {providers.length === 0 ? (
-                <div className="provider-empty"><ServerCog size={24} /><strong>还没有供应商连接</strong><p>建议先添加 Vercel AI Gateway，一次接入主流模型。</p></div>
-              ) : providers.map((provider) => (
-                <div className="provider-row" key={provider.id}>
-                  <div><i data-enabled={provider.enabled} /><span><strong>{provider.name}</strong><small>{PROVIDER_LABELS[provider.type]}</small></span></div>
-                  <div><strong>{provider.modelCount} 个模型</strong><small>{provider.lastSyncedAt ? `更新于 ${new Date(provider.lastSyncedAt).toLocaleString("zh-CN")}` : "尚未刷新"}</small></div>
-                  <div className="provider-security">{provider.secretConfigured ? <><Check size={14} /> 已加密</> : "使用环境密钥"}</div>
-                  <button disabled={Boolean(busyId)} onClick={() => void syncProvider(provider.id)}>
-                    <RefreshCw className={busyId === provider.id ? "is-spinning" : ""} size={15} /> 刷新目录
-                  </button>
-                </div>
-              ))}
-            </section>
-
-            {models.length > 0 && (
-              <section className="model-operations">
-                <div className="model-operations-head"><div><p className="eyebrow">DISCOVERED MODELS</p><h2>模型启停</h2></div><small>启用后会出现在工作台模型选择器中</small></div>
-                <div className="model-grid">
-                  {models.map((model) => (
-                    <div className="model-admin-row" key={model.id}>
-                      <div><strong>{model.name}</strong><small>{model.connectionName} · {model.providerModelId}</small></div>
-                      <button className="model-switch" aria-label={`${model.enabled ? "停用" : "启用"} ${model.name}`} aria-pressed={model.enabled} disabled={busyId === model.id} onClick={() => void toggleModel(model)}><span /></button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
         )}
 
-        {notice && <div className="admin-notice" role="status">{notice}</div>}
+        <section className="provider-quickstart" aria-label="供应商快捷模板">
+          <div className="provider-section-heading">
+            <div><p className="eyebrow">DIRECT CONNECTION</p><h2>选择接入方式</h2></div>
+            <small>接口需兼容 OpenAI Chat Completions 与 Models API</small>
+          </div>
+          <div className="provider-template-list">
+            {PROVIDER_TEMPLATES.map((template) => (
+              <button
+                key={template.id}
+                disabled={!infrastructureReady}
+                onClick={() => openCreate(template)}
+              >
+                <span>{template.shortName}</span>
+                <div><strong>{template.name}</strong><small>{template.description}</small></div>
+                <Plus size={15} />
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="admin-metrics">
+          <div><small>直连供应商</small><strong>{providers.length}</strong></div>
+          <div><small>已启用模型</small><strong>{models.filter((model) => model.enabled).length} / {models.length}</strong></div>
+          <div><small>凭据策略</small><strong>AES-256</strong></div>
+        </section>
+
+        <section className="provider-table" aria-label="供应商列表">
+          <div className="provider-table-head"><span>连接</span><span>目录状态</span><span>安全</span><span>操作</span></div>
+          {providers.length === 0 ? (
+            <div className="provider-empty"><ServerCog size={24} /><strong>还没有供应商连接</strong><p>从上方选择模板，填写 API Key 后自动测试并同步模型。</p></div>
+          ) : providers.map((provider) => (
+            <div className="provider-row" data-selected={selectedProvider?.id === provider.id} key={provider.id}>
+              <button className="provider-main" onClick={() => setSelectedProviderId(provider.id)}>
+                <i data-enabled={provider.enabled} />
+                <span><strong>{provider.name}</strong><small>{provider.baseUrl ?? "托管接口"}</small></span>
+              </button>
+              <div><strong>{provider.modelCount} 个模型</strong><small>{provider.lastSyncedAt ? `更新于 ${new Date(provider.lastSyncedAt).toLocaleString("zh-CN")}` : "等待首次同步"}</small></div>
+              <div className="provider-security">{provider.secretConfigured ? <><Check size={14} /> 服务端加密</> : "未配置密钥"}</div>
+              <div className="provider-actions">
+                <button title="测试连接并同步模型" disabled={Boolean(busyId)} onClick={() => void syncProvider(provider.id)}><RefreshCw className={busyId === provider.id ? "is-spinning" : ""} size={15} /></button>
+                <button title="修改配置" disabled={Boolean(busyId)} onClick={() => openEdit(provider)}><Pencil size={14} /></button>
+                <button className="is-danger" title="删除供应商" disabled={Boolean(busyId)} onClick={() => void deleteProvider(provider)}><Trash2 size={14} /></button>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section className="model-operations">
+          <div className="model-operations-head">
+            <div><p className="eyebrow">DISCOVERED MODELS</p><h2>{selectedProvider ? `${selectedProvider.name} 模型` : "模型目录"}</h2></div>
+            <label className="model-admin-search"><Search size={14} /><input value={modelSearch} onChange={(event) => setModelSearch(event.target.value)} placeholder="搜索模型 ID" /></label>
+          </div>
+          {visibleModels.length > 0 ? (
+            <div className="model-grid">
+              {visibleModels.map((model) => (
+                <div className="model-admin-row" key={model.id}>
+                  <div><strong>{model.name}</strong><small>{model.providerModelId}{model.contextWindow ? ` · ${model.contextWindow.toLocaleString()} context` : ""}</small></div>
+                  <button className="model-switch" aria-label={`${model.enabled ? "停用" : "启用"} ${model.name}`} aria-pressed={model.enabled} disabled={busyId === model.id} onClick={() => void toggleModel(model)}><span /></button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="model-empty"><RefreshCw size={20} /><strong>{selectedProvider ? "还没有同步到模型" : "添加供应商后显示模型"}</strong><small>{selectedProvider ? "点击供应商右侧的同步按钮重新读取目录。" : "启用后的模型会出现在聊天工作台。"}</small></div>
+          )}
+        </section>
+
+        {notice && <div className="admin-notice" role="status">{notice}<button onClick={() => setNotice(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
       </div>
 
       {formOpen && (
-        <div className="admin-modal-backdrop">
-          <form className="admin-modal" onSubmit={createProvider}>
-            <div className="admin-modal-head"><div><p className="eyebrow">NEW CONNECTION</p><h2>添加模型供应商</h2></div><button type="button" onClick={() => setFormOpen(false)} aria-label="关闭"><X size={18} /></button></div>
-            <label>显示名称<input name="name" required minLength={2} placeholder="例如：团队 AI Gateway" /></label>
-            <label>接口类型<select name="type" defaultValue="gateway"><option value="gateway">Vercel AI Gateway</option><option value="openai_compatible">OpenAI Compatible</option><option value="native">Native API</option></select></label>
-            <label>Base URL <span>Gateway 可留空</span><input name="baseUrl" type="url" placeholder="https://api.example.com/v1" /></label>
-            <label>API Key <span>留空则使用服务器环境变量</span><input name="secret" type="password" autoComplete="new-password" placeholder="••••••••••••" /></label>
-            <p className="secret-hint"><ShieldCheck size={14} /> 凭据仅在服务端使用 AES-256-GCM 加密后保存。</p>
-            <button className="admin-primary" disabled={busyId === "create"} type="submit">{busyId === "create" ? "保存中…" : "保存连接"}</button>
+        <div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setFormOpen(false); }}>
+          <form className="admin-modal" onSubmit={saveProvider}>
+            <div className="admin-modal-head"><div><p className="eyebrow">{editingId ? "EDIT CONNECTION" : "NEW CONNECTION"}</p><h2>{editingId ? "修改供应商" : "添加模型供应商"}</h2></div><button type="button" onClick={() => setFormOpen(false)} aria-label="关闭"><X size={18} /></button></div>
+            <label>显示名称<input value={formState.name} onChange={(event) => setFormState((state) => ({ ...state, name: event.target.value }))} required minLength={2} placeholder="例如：团队 OpenRouter" /></label>
+            <label>Base URL <span>填写 API 的版本根地址，末尾不要加 /chat/completions</span><input value={formState.baseUrl} onChange={(event) => setFormState((state) => ({ ...state, baseUrl: event.target.value }))} required type="url" placeholder="https://api.example.com/v1" /></label>
+            <label>API Key <span>{editingId ? "留空表示继续使用当前密钥" : "仅发送到 AI2Dot 服务端"}</span><div className="secret-field"><input value={formState.secret} onChange={(event) => setFormState((state) => ({ ...state, secret: event.target.value }))} required={!editingId} type={showSecret ? "text" : "password"} autoComplete="new-password" placeholder="sk-••••••••••••" /><button type="button" onClick={() => setShowSecret((visible) => !visible)} aria-label={showSecret ? "隐藏密钥" : "显示密钥"}>{showSecret ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
+            {editingId && <label className="provider-enabled"><input checked={formState.enabled} onChange={(event) => setFormState((state) => ({ ...state, enabled: event.target.checked }))} type="checkbox" /><span><strong>启用此连接</strong><small>停用后，该连接下的模型不会出现在聊天工作台。</small></span></label>}
+            <p className="secret-hint"><ShieldCheck size={14} /> API Key 使用 AES-256-GCM 加密，浏览器不会再次读取明文。</p>
+            <button className="admin-primary" disabled={busyId === "save"} type="submit">{busyId === "save" ? "正在验证…" : "保存并测试连接"}</button>
           </form>
         </div>
       )}

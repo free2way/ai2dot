@@ -43,6 +43,7 @@ export async function listProviderModels(context: WorkspaceContext) {
   return getDb()
     .select({
       id: models.id,
+      connectionId: models.connectionId,
       providerModelId: models.providerModelId,
       name: models.name,
       connectionName: providerConnections.name,
@@ -249,6 +250,66 @@ export async function createProviderConnection(
     .returning({ id: providerConnections.id });
 
   return connection;
+}
+
+export async function updateProviderConnection(
+  context: WorkspaceContext,
+  connectionId: string,
+  input: {
+    name: string;
+    baseUrl: string;
+    secret?: string;
+    enabled: boolean;
+  },
+) {
+  await assertSafeProviderBaseUrl(input.baseUrl);
+
+  const [ownedConnection] = await getDb()
+    .select({ id: providerConnections.id })
+    .from(providerConnections)
+    .where(
+      and(
+        eq(providerConnections.id, connectionId),
+        eq(providerConnections.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  if (!ownedConnection) return null;
+
+  const encryptedSecret = input.secret
+    ? await encryptProviderSecret(input.secret)
+    : undefined;
+  const [connection] = await getDb()
+    .update(providerConnections)
+    .set({
+      name: input.name,
+      baseUrl: input.baseUrl,
+      enabled: input.enabled,
+      ...(encryptedSecret ? { encryptedSecret } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(providerConnections.id, connectionId))
+    .returning({ id: providerConnections.id });
+
+  return connection ?? null;
+}
+
+export async function deleteProviderConnection(
+  context: WorkspaceContext,
+  connectionId: string,
+) {
+  const [connection] = await getDb()
+    .delete(providerConnections)
+    .where(
+      and(
+        eq(providerConnections.id, connectionId),
+        eq(providerConnections.workspaceId, context.workspaceId),
+      ),
+    )
+    .returning({ id: providerConnections.id });
+
+  return connection ?? null;
 }
 
 export async function syncProviderConnection(

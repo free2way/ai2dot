@@ -9,13 +9,13 @@ import {
 const providerSchema = z
   .object({
     name: z.string().trim().min(2).max(80),
-    type: z.enum(["gateway", "openai_compatible", "native"]),
-    baseUrl: z.string().url().optional().or(z.literal("")),
-    secret: z.string().trim().max(4_000).optional(),
+    type: z.literal("openai_compatible"),
+    baseUrl: z.string().url(),
+    secret: z.string().trim().min(1).max(4_000),
   })
-  .refine((value) => value.type === "gateway" || Boolean(value.baseUrl), {
+  .refine((value) => Boolean(value.baseUrl), {
     path: ["baseUrl"],
-    message: "自定义供应商必须填写 Base URL。",
+    message: "模型供应商必须填写 Base URL。",
   });
 
 export async function GET() {

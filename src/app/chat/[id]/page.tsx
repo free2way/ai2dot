@@ -42,7 +42,7 @@ export default async function ConversationPage({
     <ChatWorkspace
       models={workspaceModels.length > 0 ? workspaceModels : FEATURED_MODELS}
       authEnabled
-      gatewayEnabled={isAiGatewayConfigured()}
+      gatewayEnabled={workspaceModels.length > 0 || isAiGatewayConfigured()}
       persistenceEnabled
       initialConversationId={id}
       initialBranchId={activeBranch.id}

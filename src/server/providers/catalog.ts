@@ -12,6 +12,7 @@ const catalogResponseSchema = z.object({
         name: z.string().optional(),
         description: z.string().optional(),
         context_window: z.number().int().positive().optional(),
+        context_length: z.number().int().positive().optional(),
         max_model_len: z.number().int().positive().optional(),
         pricing: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
         architecture: z
@@ -116,7 +117,8 @@ export function parseProviderCatalog(payload: unknown): DiscoveredModel[] {
       id: model.id,
       name: model.name || titleFromId(model.id),
       description: model.description,
-      contextWindow: model.context_window ?? model.max_model_len,
+      contextWindow:
+        model.context_window ?? model.context_length ?? model.max_model_len,
       capabilities: [...capabilities],
       pricing: model.pricing
         ? Object.fromEntries(

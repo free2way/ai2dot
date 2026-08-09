@@ -333,8 +333,8 @@ export async function POST(request: Request) {
   if (!modelAvailable) {
     const prompt = getLatestUserText(messages);
     const demoText = prompt
-      ? `这是演示模式下的本地响应。我已经收到：\n\n“${prompt.slice(0, 180)}${prompt.length > 180 ? "…" : ""}”\n\n配置 \`AI_GATEWAY_API_KEY\` 后，这里会切换为真实模型的流式回答。当前聊天界面、模型切换和历史记录已经可以正常体验。`
-      : "演示模式已就绪。配置 AI Gateway 密钥后即可开始真实模型对话。";
+      ? `这是演示模式下的本地响应。我已经收到：\n\n“${prompt.slice(0, 180)}${prompt.length > 180 ? "…" : ""}”\n\n请在“模型管理”中添加自己的模型供应商与 API Key，启用模型后这里会切换为真实的流式回答。`
+      : "演示模式已就绪。请在模型管理中添加供应商与 API Key。";
     const startedAt = Date.now();
     return createTextResponse({
       messages,

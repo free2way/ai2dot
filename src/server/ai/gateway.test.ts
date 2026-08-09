@@ -15,10 +15,16 @@ describe("AI Gateway environment", () => {
     ).toBe("api-key");
   });
 
-  it("recognizes Vercel OIDC without a static key", () => {
+  it("requires explicit opt-in before using Vercel OIDC", () => {
     const environment = { VERCEL_OIDC_TOKEN: "oidc-token" };
     expect(getGatewayAuthMode(environment)).toBe("oidc");
-    expect(isAiGatewayConfigured(environment)).toBe(true);
+    expect(isAiGatewayConfigured(environment)).toBe(false);
+    expect(
+      isAiGatewayConfigured({
+        ...environment,
+        AI2DOT_ENABLE_AI_GATEWAY: "true",
+      }),
+    ).toBe(true);
   });
 
   it("reports an unconfigured environment and creates a deployment tag", () => {
@@ -28,4 +34,3 @@ describe("AI Gateway environment", () => {
     );
   });
 });
-

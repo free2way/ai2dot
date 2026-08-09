@@ -32,6 +32,14 @@ describe("parseProviderCatalog", () => {
   it("rejects malformed catalogs", () => {
     expect(() => parseProviderCatalog({ models: [] })).toThrow();
   });
+
+  it("reads OpenRouter context_length fields", () => {
+    const result = parseProviderCatalog({
+      data: [{ id: "anthropic/claude", context_length: 200000 }],
+    });
+
+    expect(result[0]?.contextWindow).toBe(200000);
+  });
 });
 
 describe("provider URL safety", () => {

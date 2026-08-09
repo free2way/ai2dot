@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { ProviderManager } from "@/components/admin/provider-manager";
 import { isClerkConfigured } from "@/server/auth/config";
-import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import {
   getAdminWorkspaceContext,
   isPersistenceConfigured,
@@ -13,7 +12,6 @@ import {
 
 export default async function AdminPage() {
   const configuration = {
-    gatewayReady: isAiGatewayConfigured(),
     authReady: isClerkConfigured(),
     databaseReady: isPersistenceConfigured(),
     encryptionReady: Boolean(process.env.PROVIDER_SECRET_ENCRYPTION_KEY),
