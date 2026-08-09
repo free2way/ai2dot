@@ -5,6 +5,7 @@ import { Show, UserButton } from "@clerk/nextjs";
 import {
   Archive,
   ArrowUp,
+  BookPlus,
   Bot,
   Check,
   ChevronDown,
@@ -20,12 +21,14 @@ import {
   MoreHorizontal,
   Paperclip,
   PanelRight,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
   Settings2,
   Sparkles,
   Square,
+  Trash2,
   X,
   Zap,
 } from "lucide-react";
@@ -122,6 +125,12 @@ export function ChatWorkspace({
   const [conversationList, setConversationList] = useState(initialConversations);
   const [branches, setBranches] = useState(initialBranches);
   const [cloudError, setCloudError] = useState<string>();
+  const [sessionNotice, setSessionNotice] = useState<string>();
+  const [sessionMenuId, setSessionMenuId] = useState<string>();
+  const [knowledgeMenuId, setKnowledgeMenuId] = useState<string>();
+  const [renamingConversationId, setRenamingConversationId] = useState<string>();
+  const [renameValue, setRenameValue] = useState("");
+  const [sessionBusyId, setSessionBusyId] = useState<string>();
   const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -151,6 +160,9 @@ export function ChatWorkspace({
   }, [models]);
   const selectedKnowledgeBases = initialKnowledgeBases.filter((base) =>
     selectedKnowledgeBaseIds.includes(base.id),
+  );
+  const activeConversation = conversationList.find(
+    (conversation) => conversation.id === activeConversationId,
   );
   const isBusy = status === "submitted" || status === "streaming";
 
@@ -269,6 +281,18 @@ export function ChatWorkspace({
           },
         },
       );
+      if (conversationId) {
+        setConversationList((items) => {
+          const current = items.find((item) => item.id === conversationId);
+          if (!current) return items;
+          const updated = {
+            ...current,
+            title: current.title === "新对话" ? value.slice(0, 48) : current.title,
+            updatedAt: new Date().toISOString(),
+          };
+          return [updated, ...items.filter((item) => item.id !== conversationId)];
+        });
+      }
     } catch (submitError) {
       setCloudError(
         submitError instanceof Error ? submitError.message : "消息发送失败。",
@@ -403,6 +427,105 @@ export function ChatWorkspace({
     }
   };
 
+  const beginRenameConversation = (conversation: ConversationListItem) => {
+    setRenamingConversationId(conversation.id);
+    setRenameValue(conversation.title);
+    setSessionMenuId(undefined);
+  };
+
+  const renameConversation = async (
+    event: FormEvent<HTMLFormElement>,
+    conversationId: string,
+  ) => {
+    event.preventDefault();
+    const title = renameValue.trim();
+    if (!title) return;
+    setSessionBusyId(conversationId);
+    setCloudError(undefined);
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!response.ok) throw new Error("会话重命名失败。");
+      setConversationList((items) =>
+        items.map((item) =>
+          item.id === conversationId ? { ...item, title } : item,
+        ),
+      );
+      setRenamingConversationId(undefined);
+      setSessionNotice("会话名称已更新。");
+    } catch (renameError) {
+      setCloudError(
+        renameError instanceof Error ? renameError.message : "会话重命名失败。",
+      );
+    } finally {
+      setSessionBusyId(undefined);
+    }
+  };
+
+  const removeConversation = async (conversation: ConversationListItem) => {
+    if (!window.confirm(`删除会话“${conversation.title}”及其全部消息？`)) return;
+    setSessionBusyId(conversation.id);
+    setCloudError(undefined);
+    try {
+      const response = await fetch(`/api/conversations/${conversation.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("会话删除失败。");
+      setConversationList((items) =>
+        items.filter((item) => item.id !== conversation.id),
+      );
+      setSessionMenuId(undefined);
+      setSessionNotice("会话已删除。");
+      if (conversation.id === activeConversationId) {
+        stop();
+        router.push("/");
+      }
+    } catch (deleteError) {
+      setCloudError(
+        deleteError instanceof Error ? deleteError.message : "会话删除失败。",
+      );
+    } finally {
+      setSessionBusyId(undefined);
+    }
+  };
+
+  const saveConversationToKnowledge = async (
+    conversation: ConversationListItem,
+    knowledgeBase: KnowledgeBaseSummary,
+  ) => {
+    setSessionBusyId(conversation.id);
+    setCloudError(undefined);
+    try {
+      const response = await fetch(
+        `/api/conversations/${conversation.id}/knowledge`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            knowledgeBaseId: knowledgeBase.id,
+            ...(conversation.id === activeConversationId && activeBranchId
+              ? { branchId: activeBranchId }
+              : {}),
+          }),
+        },
+      );
+      const payload = (await response.json()) as { message?: string };
+      if (!response.ok) throw new Error(payload.message || "保存到知识库失败。");
+      setSessionNotice(`已将“${conversation.title}”保存到“${knowledgeBase.name}”。`);
+      setSessionMenuId(undefined);
+      setKnowledgeMenuId(undefined);
+    } catch (saveError) {
+      setCloudError(
+        saveError instanceof Error ? saveError.message : "保存到知识库失败。",
+      );
+    } finally {
+      setSessionBusyId(undefined);
+    }
+  };
+
   return (
     <main className="workspace-shell">
       <button
@@ -438,13 +561,44 @@ export function ChatWorkspace({
         <div className="history-heading"><span>最近</span><History size={14} /></div>
         <div className="history-list">
           {conversationList.length > 0 ? conversationList.map((chat) => (
-            <Link className="history-row" data-active={chat.id === activeConversationId} href={`/chat/${chat.id}`} key={chat.id}>
-              <span>{chat.title}</span><small>{formatConversationTime(chat.updatedAt)}</small>
-            </Link>
+            <div className="history-item" data-menu-open={sessionMenuId === chat.id} key={chat.id}>
+              {renamingConversationId === chat.id ? (
+                <form className="history-rename" onSubmit={(event) => void renameConversation(event, chat.id)}>
+                  <input aria-label="会话名称" autoFocus maxLength={120} value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
+                  <button aria-label="保存名称" disabled={sessionBusyId === chat.id || !renameValue.trim()} type="submit"><Check size={13} /></button>
+                  <button aria-label="取消重命名" onClick={() => setRenamingConversationId(undefined)} type="button"><X size={13} /></button>
+                </form>
+              ) : (
+                <>
+                  <Link className="history-row" data-active={chat.id === activeConversationId} href={`/chat/${chat.id}`} onClick={() => setSidebarOpen(false)}>
+                    <span>{chat.title}</span><small>{formatConversationTime(chat.updatedAt)}</small>
+                  </Link>
+                  {persistenceEnabled && (
+                    <button className="history-more" aria-expanded={sessionMenuId === chat.id} aria-label={`管理 ${chat.title}`} onClick={() => { setSessionMenuId((current) => current === chat.id ? undefined : chat.id); setKnowledgeMenuId(undefined); }}><MoreHorizontal size={15} /></button>
+                  )}
+                  {sessionMenuId === chat.id && (
+                    <div className="session-menu">
+                      <button disabled={sessionBusyId === chat.id} onClick={() => beginRenameConversation(chat)}><Pencil size={13} /> 重命名</button>
+                      <button disabled={sessionBusyId === chat.id || initialKnowledgeBases.length === 0} onClick={() => setKnowledgeMenuId((current) => current === chat.id ? undefined : chat.id)}><BookPlus size={13} /> 保存到知识库 <ChevronDown size={12} /></button>
+                      {knowledgeMenuId === chat.id && (
+                        <div className="session-knowledge-list">
+                          {initialKnowledgeBases.map((base) => (
+                            <button disabled={sessionBusyId === chat.id} key={base.id} onClick={() => void saveConversationToKnowledge(chat, base)}><Archive size={12} /><span>{base.name}</span><small>{base.documentCount}</small></button>
+                          ))}
+                        </div>
+                      )}
+                      {initialKnowledgeBases.length === 0 && <Link href="/knowledge">先创建知识库</Link>}
+                      <button className="is-danger" disabled={sessionBusyId === chat.id} onClick={() => void removeConversation(chat)}><Trash2 size={13} /> 删除会话</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           )) : (
             <p className="history-empty">{persistenceEnabled ? "还没有云端会话" : "当前会话保存在此浏览器"}</p>
           )}
         </div>
+        {sessionNotice && <div className="session-notice"><Check size={12} /><span>{sessionNotice}</span><button onClick={() => setSessionNotice(undefined)}><X size={12} /></button></div>}
         <div className="sidebar-footer">
           <div className="usage-line"><span>{persistenceEnabled ? "云端同步" : "本地存储"}</span><strong>{messages.length} 条消息</strong></div>
           <div className="usage-track"><span /></div>
@@ -462,7 +616,7 @@ export function ChatWorkspace({
             <button className="icon-button mobile-only" onClick={() => setSidebarOpen(true)} aria-label="打开会话栏">
               <Menu size={19} />
             </button>
-            <div><p>新对话</p><span><i className={gatewayEnabled ? "status-live" : "status-demo"} />{gatewayEnabled ? "模型服务已连接" : "演示模式"}</span></div>
+            <div><p>{activeConversation?.title ?? "新对话"}</p><span><i className={gatewayEnabled ? "status-live" : "status-demo"} />{gatewayEnabled ? "模型服务已连接" : "演示模式"}</span></div>
           </div>
           <div className="header-actions">
             <div className="model-picker">

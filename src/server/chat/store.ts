@@ -286,7 +286,10 @@ export async function saveConversationMessages({
   }
 
   const conversation = await getConversation(context, conversationId);
-  const title = firstUserText(chatMessages).slice(0, 48) || conversation?.title;
+  const title =
+    conversation?.title === "新对话"
+      ? firstUserText(chatMessages).slice(0, 48)
+      : undefined;
   await db
     .update(conversations)
     .set({ ...(title ? { title } : {}), updatedAt: new Date() })
