@@ -99,6 +99,13 @@ const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     description: "统一接入全球主流模型",
   },
   {
+    id: "gemini",
+    name: "Google Gemini",
+    shortName: "GM",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    description: "Gemini 多模态与推理模型",
+  },
+  {
     id: "custom",
     name: "自定义接口",
     shortName: "API",

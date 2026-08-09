@@ -65,6 +65,7 @@ function modelAccent(providerModelId: string) {
   if (providerModelId.startsWith("openai/")) return "#b7f34a";
   if (providerModelId.startsWith("anthropic/")) return "#f0a26b";
   if (providerModelId.startsWith("google/")) return "#7db2ff";
+  if (providerModelId.startsWith("gemini")) return "#7db2ff";
   return "#d8cf78";
 }
 
