@@ -9,7 +9,11 @@ function isProtectedRoute(request: NextRequest) {
     pathname === "/admin" ||
     pathname.startsWith("/admin/") ||
     pathname === "/api/admin" ||
-    pathname.startsWith("/api/admin/")
+    pathname.startsWith("/api/admin/") ||
+    pathname === "/knowledge" ||
+    pathname.startsWith("/knowledge/") ||
+    pathname === "/api/knowledge-bases" ||
+    pathname.startsWith("/api/knowledge-bases/")
   );
 }
 const authProxy = clerkMiddleware(async (auth, request) => {

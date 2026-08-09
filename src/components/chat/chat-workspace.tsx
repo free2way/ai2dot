@@ -35,6 +35,7 @@ import {
   FormEvent,
   KeyboardEvent,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -45,6 +46,7 @@ import type {
   ConversationBranch,
   ConversationListItem,
 } from "@/lib/conversations";
+import type { KnowledgeBaseSummary } from "@/lib/knowledge";
 import {
   DEFAULT_MODEL_ID,
   formatContextWindow,
@@ -71,6 +73,7 @@ const QUICK_STARTS = [
 ];
 
 const STORAGE_KEY = "ai2dot.demo.messages.v1";
+const KNOWLEDGE_SELECTION_KEY = "ai2dot.knowledge.selection.v1";
 const CHAT_TRANSPORT = new DefaultChatTransport({ api: "/api/chat" });
 
 type ChatWorkspaceProps = {
@@ -83,6 +86,7 @@ type ChatWorkspaceProps = {
   initialMessages?: UIMessage[];
   initialConversations?: ConversationListItem[];
   initialBranches?: ConversationBranch[];
+  initialKnowledgeBases?: KnowledgeBaseSummary[];
 };
 
 function formatConversationTime(value: string) {
@@ -104,6 +108,7 @@ export function ChatWorkspace({
   initialMessages = WELCOME_MESSAGES,
   initialConversations = [],
   initialBranches = [],
+  initialKnowledgeBases = [],
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const [input, setInput] = useState("");
@@ -117,6 +122,7 @@ export function ChatWorkspace({
   const [conversationList, setConversationList] = useState(initialConversations);
   const [branches, setBranches] = useState(initialBranches);
   const [cloudError, setCloudError] = useState<string>();
+  const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -136,6 +142,16 @@ export function ChatWorkspace({
   });
 
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? models[0];
+  const groupedModels = useMemo(() => {
+    const groups = new Map<string, ModelCatalogEntry[]>();
+    for (const model of models) {
+      groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
+    }
+    return [...groups.entries()];
+  }, [models]);
+  const selectedKnowledgeBases = initialKnowledgeBases.filter((base) =>
+    selectedKnowledgeBaseIds.includes(base.id),
+  );
   const isBusy = status === "submitted" || status === "streaming";
 
   useEffect(() => {
@@ -159,6 +175,33 @@ export function ChatWorkspace({
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
     }
   }, [historyReady, messages, persistenceEnabled]);
+
+  useEffect(() => {
+    if (!persistenceEnabled || initialKnowledgeBases.length === 0) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(
+          window.localStorage.getItem(KNOWLEDGE_SELECTION_KEY) ?? "[]",
+        ) as string[];
+        setSelectedKnowledgeBaseIds(
+          saved.filter((id) => initialKnowledgeBases.some((base) => base.id === id)).slice(0, 3),
+        );
+      } catch {
+        window.localStorage.removeItem(KNOWLEDGE_SELECTION_KEY);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialKnowledgeBases, persistenceEnabled]);
+
+  const toggleKnowledgeBase = (knowledgeBaseId: string) => {
+    setSelectedKnowledgeBaseIds((current) => {
+      const next = current.includes(knowledgeBaseId)
+        ? current.filter((id) => id !== knowledgeBaseId)
+        : [...current, knowledgeBaseId].slice(-3);
+      window.localStorage.setItem(KNOWLEDGE_SELECTION_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -219,6 +262,7 @@ export function ChatWorkspace({
         {
           body: {
             modelId: selectedModelId,
+            knowledgeBaseIds: selectedKnowledgeBaseIds,
             conversationId,
             branchId,
             idempotencyKey: crypto.randomUUID(),
@@ -300,7 +344,7 @@ export function ChatWorkspace({
     if (!persistenceEnabled || !activeConversationId || !activeBranchId) {
       await regenerate({
         messageId: assistantMessageId,
-        body: { modelId: selectedModelId },
+        body: { modelId: selectedModelId, knowledgeBaseIds: selectedKnowledgeBaseIds },
       });
       return;
     }
@@ -344,6 +388,7 @@ export function ChatWorkspace({
         messageId: assistantMessageId,
         body: {
           modelId: selectedModelId,
+          knowledgeBaseIds: selectedKnowledgeBaseIds,
           conversationId: activeConversationId,
           branchId: payload.branch.id,
           idempotencyKey: crypto.randomUUID(),
@@ -387,7 +432,7 @@ export function ChatWorkspace({
         <nav className="primary-nav" aria-label="主导航">
           <button className="nav-row is-active"><MessageSquareText size={17} /> 对话 <span>{conversationList.length || 1}</span></button>
           <button className="nav-row"><Bot size={17} /> 助手</button>
-          <button className="nav-row"><Archive size={17} /> 知识库 <em>即将推出</em></button>
+          <Link className="nav-row" href="/knowledge"><Archive size={17} /> 知识库 <span>{initialKnowledgeBases.length}</span></Link>
           <Link className="nav-row" href="/admin"><Settings2 size={17} /> 模型管理</Link>
         </nav>
         <div className="history-heading"><span>最近</span><History size={14} /></div>
@@ -427,15 +472,22 @@ export function ChatWorkspace({
                 <ChevronDown size={15} />
               </button>
               {modelMenuOpen && (
-                <div className="model-menu">
+                <div className="model-menu" role="listbox" aria-label="按供应商选择模型">
                   <div className="model-menu-title"><span>选择模型</span><small>{models.length} 个已启用</small></div>
-                  {models.map((model) => (
-                    <button key={model.id} onClick={() => { setSelectedModelId(model.id); setModelMenuOpen(false); }}>
-                      <i style={{ background: model.accent }} />
-                      <span><strong>{model.name}</strong><small>{model.description}</small></span>
-                      {model.id === selectedModelId && <Check size={16} />}
-                    </button>
-                  ))}
+                  <div className="model-provider-groups">
+                    {groupedModels.map(([provider, providerModels]) => (
+                      <section className="model-provider-group" key={provider}>
+                        <div className="model-provider-heading"><span>{provider}</span><small>{providerModels.length}</small></div>
+                        {providerModels.map((model) => (
+                          <button aria-selected={model.id === selectedModelId} key={model.id} role="option" onClick={() => { setSelectedModelId(model.id); setModelMenuOpen(false); }}>
+                            <i style={{ background: model.accent }} />
+                            <span><strong>{model.name}</strong><small>{model.description}</small></span>
+                            {model.id === selectedModelId && <Check size={16} />}
+                          </button>
+                        ))}
+                      </section>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -482,7 +534,7 @@ export function ChatWorkspace({
           <form className="composer" onSubmit={handleSubmit}>
             <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="给 Dot 发消息…" rows={1} aria-label="消息" />
             <div className="composer-toolbar">
-              <div><button type="button" aria-label="添加附件"><Paperclip size={17} /></button><button type="button" className="tool-chip"><Sparkles size={14} /> 深度思考</button></div>
+              <div><button type="button" aria-label="添加附件"><Paperclip size={17} /></button><button type="button" className="tool-chip"><Sparkles size={14} /> 深度思考</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> 知识库 {selectedKnowledgeBases.length}</button>}</div>
               {isBusy ? (
                 <button className="send-button stop-button" type="button" onClick={stop} aria-label="停止生成"><Square size={14} fill="currentColor" /></button>
               ) : (
@@ -524,6 +576,28 @@ export function ChatWorkspace({
               ))}
             </div>
             <p className="branch-help">分支重试会保留原答案，并从同一问题生成另一条路径。</p>
+          </section>
+        )}
+        {persistenceEnabled && (
+          <section className="inspector-section">
+            <div className="section-title"><span>知识库</span><small>{selectedKnowledgeBases.length} / 3</small></div>
+            {initialKnowledgeBases.length > 0 ? (
+              <div className="knowledge-selector">
+                {initialKnowledgeBases.map((base) => {
+                  const active = selectedKnowledgeBaseIds.includes(base.id);
+                  return (
+                    <button aria-pressed={active} data-active={active} key={base.id} onClick={() => toggleKnowledgeBase(base.id)}>
+                      <Archive size={14} />
+                      <span><strong>{base.name}</strong><small>{base.documentCount} 个文档 · {base.chunkCount} 个片段</small></span>
+                      {active && <Check size={14} />}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="branch-help">还没有知识库。创建并导入资料后，可让回答基于你的私有内容。</p>
+            )}
+            <Link className="knowledge-manage-link" href="/knowledge">管理知识库</Link>
           </section>
         )}
         <section className="inspector-section">

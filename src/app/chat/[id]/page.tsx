@@ -13,6 +13,7 @@ import {
   isPersistenceConfigured,
 } from "@/server/db/workspace";
 import { listEnabledChatModels } from "@/server/providers/store";
+import { listKnowledgeBases } from "@/server/knowledge/store";
 
 export default async function ConversationPage({
   params,
@@ -36,7 +37,11 @@ export default async function ConversationPage({
   if (!activeBranch) notFound();
   const chatMessages = await loadConversationMessages(context, id, activeBranch.id);
   if (!chatMessages) notFound();
-  const workspaceModels = await listEnabledChatModels(context);
+  const [workspaceModels, knowledgeBases, conversationList] = await Promise.all([
+    listEnabledChatModels(context),
+    listKnowledgeBases(context),
+    listConversations(context),
+  ]);
 
   return (
     <ChatWorkspace
@@ -48,7 +53,8 @@ export default async function ConversationPage({
       initialBranchId={activeBranch.id}
       initialBranches={branches}
       initialMessages={chatMessages}
-      initialConversations={await listConversations(context)}
+      initialConversations={conversationList}
+      initialKnowledgeBases={knowledgeBases}
     />
   );
 }

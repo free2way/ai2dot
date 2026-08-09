@@ -15,6 +15,13 @@
       "when": 1786273614821,
       "tag": "0001_clumsy_maginty",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786280441974,
+      "tag": "0002_dear_abomination",
+      "breakpoints": true
     }
   ]
 }

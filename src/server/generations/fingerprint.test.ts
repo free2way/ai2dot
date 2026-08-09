@@ -32,6 +32,11 @@ describe("fingerprintGenerationRequest", () => {
         messages: [{ ...request.messages[0], parts: [{ type: "text", text: "再见" }] }],
       }),
     );
+    expect(fingerprintGenerationRequest(request)).not.toBe(
+      fingerprintGenerationRequest({
+        ...request,
+        knowledgeBaseIds: ["knowledge-base"],
+      }),
+    );
   });
 });
-

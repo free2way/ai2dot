@@ -21,7 +21,7 @@ export function fingerprintGenerationRequest(input: {
   branchId: string;
   modelId: string;
   messages: UIMessage[];
+  knowledgeBaseIds?: string[];
 }) {
   return createHash("sha256").update(stableJson(input)).digest("hex");
 }
-

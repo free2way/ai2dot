@@ -6,13 +6,19 @@ import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import { listConversations } from "@/server/chat/store";
 import { getWorkspaceContext, isPersistenceConfigured } from "@/server/db/workspace";
 import { listEnabledChatModels } from "@/server/providers/store";
+import { listKnowledgeBases } from "@/server/knowledge/store";
 
 export default async function Home() {
   const canPersist = isClerkConfigured() && isPersistenceConfigured();
   const context = canPersist ? await getWorkspaceContext() : null;
   const identity = isClerkConfigured() ? await getRequestIdentity() : null;
-  const conversationList = context ? await listConversations(context) : [];
-  const workspaceModels = context ? await listEnabledChatModels(context) : [];
+  const [conversationList, workspaceModels, knowledgeBases] = context
+    ? await Promise.all([
+        listConversations(context),
+        listEnabledChatModels(context),
+        listKnowledgeBases(context),
+      ])
+    : [[], [], []];
 
   return (
     <ChatWorkspace
@@ -25,6 +31,7 @@ export default async function Home() {
       }
       persistenceEnabled={Boolean(context)}
       initialConversations={conversationList}
+      initialKnowledgeBases={knowledgeBases}
     />
   );
 }

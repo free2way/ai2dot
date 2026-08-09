@@ -45,6 +45,11 @@ export const providerType = pgEnum("provider_type", [
   "openai_compatible",
   "native",
 ]);
+export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
+  "processing",
+  "ready",
+  "failed",
+]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -153,6 +158,69 @@ export const assistants = pgTable(
     ...timestamps,
   },
   (table) => [index("assistants_workspace_idx").on(table.workspaceId)],
+);
+
+export const knowledgeBases = pgTable(
+  "knowledge_bases",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    ...timestamps,
+  },
+  (table) => [index("knowledge_bases_workspace_idx").on(table.workspaceId)],
+);
+
+export const knowledgeDocuments = pgTable(
+  "knowledge_documents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    knowledgeBaseId: uuid("knowledge_base_id")
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull().default("text/plain"),
+    byteSize: integer("byte_size").notNull().default(0),
+    characterCount: integer("character_count").notNull().default(0),
+    status: knowledgeDocumentStatus("status").notNull().default("processing"),
+    errorMessage: text("error_message"),
+    ...timestamps,
+  },
+  (table) => [
+    index("knowledge_documents_base_updated_idx").on(
+      table.knowledgeBaseId,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const knowledgeChunks = pgTable(
+  "knowledge_chunks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    knowledgeBaseId: uuid("knowledge_base_id")
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+    chunkIndex: integer("chunk_index").notNull(),
+    content: text("content").notNull(),
+    tokenEstimate: integer("token_estimate").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_chunks_document_index_idx").on(
+      table.documentId,
+      table.chunkIndex,
+    ),
+    index("knowledge_chunks_base_idx").on(table.knowledgeBaseId),
+  ],
 );
 
 export const conversations = pgTable(
