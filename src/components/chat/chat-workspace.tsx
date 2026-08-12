@@ -57,6 +57,11 @@ import {
   formatContextWindow,
   type ModelCatalogEntry,
 } from "@/lib/models";
+import {
+  getConversationModelPreferenceKey,
+  MODEL_PREFERENCE_KEY,
+  resolvePreferredModelId,
+} from "@/lib/model-preference";
 
 const WELCOME_MESSAGES: UIMessage[] = [
   {
@@ -214,6 +219,48 @@ export function ChatWorkspace({
     1,
     Math.ceil(estimatedContextCharacters / 3),
   ).toLocaleString("zh-CN");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const conversationPreference = activeConversationId
+        ? window.localStorage.getItem(
+            getConversationModelPreferenceKey(activeConversationId),
+          )
+        : null;
+      const globalPreference = window.localStorage.getItem(
+        MODEL_PREFERENCE_KEY,
+      );
+      const preferredModelId = resolvePreferredModelId({
+        models,
+        conversationPreference,
+        assistantDefault: initialModelId,
+        globalPreference,
+      });
+
+      if (preferredModelId) setSelectedModelId(preferredModelId);
+      if (conversationPreference && !models.some((model) => model.id === conversationPreference)) {
+        window.localStorage.removeItem(
+          getConversationModelPreferenceKey(activeConversationId!),
+        );
+      }
+      if (globalPreference && !models.some((model) => model.id === globalPreference)) {
+        window.localStorage.removeItem(MODEL_PREFERENCE_KEY);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeConversationId, initialModelId, models]);
+
+  const selectModel = (modelId: string) => {
+    setSelectedModelId(modelId);
+    setModelMenuOpen(false);
+    window.localStorage.setItem(MODEL_PREFERENCE_KEY, modelId);
+    if (activeConversationId) {
+      window.localStorage.setItem(
+        getConversationModelPreferenceKey(activeConversationId),
+        modelId,
+      );
+    }
+  };
 
   useEffect(() => {
     if (persistenceEnabled) {
@@ -730,7 +777,7 @@ export function ChatWorkspace({
                       <section className="model-provider-group" key={provider}>
                         <div className="model-provider-heading"><span>{provider}</span><small>{providerModels.length}</small></div>
                         {providerModels.map((model) => (
-                          <button aria-selected={model.id === selectedModelId} key={model.id} role="option" onClick={() => { setSelectedModelId(model.id); setModelMenuOpen(false); }}>
+                          <button aria-selected={model.id === selectedModelId} key={model.id} role="option" onClick={() => selectModel(model.id)}>
                             <i style={{ background: model.accent }} />
                             <span><strong>{model.name}</strong><small>{model.description}</small></span>
                             {model.id === selectedModelId && <Check size={16} />}
