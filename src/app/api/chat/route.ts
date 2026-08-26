@@ -57,6 +57,7 @@ const chatRequestSchema = z.object({
   branchId: z.string().uuid().optional(),
   idempotencyKey: z.string().uuid().optional(),
   knowledgeBaseIds: z.array(z.string().uuid()).max(3).optional().default([]),
+  reasoning: z.enum(["provider-default", "high"]).optional().default("provider-default"),
 });
 
 const SYSTEM_PROMPT = `你是 Dot，一位可靠、简洁且主动的中文 AI 助手。
@@ -265,6 +266,7 @@ export async function POST(request: Request) {
       modelId,
       messages,
       knowledgeBaseIds: [...parsed.data.knowledgeBaseIds].sort(),
+      reasoning: parsed.data.reasoning,
     });
     const begun = await beginGeneration({
       context: workspaceContext,
@@ -450,6 +452,7 @@ export async function POST(request: Request) {
     : "";
   const result = streamText({
     model: languageModel,
+    reasoning: parsed.data.reasoning,
     system: `${SYSTEM_PROMPT}${assistantPrompt}${summaryPrompt}${knowledgePrompt}`,
     messages: await convertToModelMessages(messagesForModel),
     ...(gatewayRouted

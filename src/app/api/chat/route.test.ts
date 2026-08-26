@@ -54,4 +54,23 @@ describe("POST /api/chat", () => {
       code: "MODEL_UNAVAILABLE",
     });
   });
+
+  it("rejects unsupported reasoning levels", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messages,
+          modelId: FEATURED_MODELS[0].id,
+          reasoning: "unlimited",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "INVALID_REQUEST",
+    });
+  });
 });

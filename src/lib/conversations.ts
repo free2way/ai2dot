@@ -17,6 +17,18 @@ export type ConversationBranch = {
   messageCount: number;
 };
 
+export function filterConversations(
+  conversations: ConversationListItem[],
+  query: string,
+) {
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  if (!normalizedQuery) return conversations;
+
+  return conversations.filter((conversation) =>
+    conversation.title.toLocaleLowerCase("zh-CN").includes(normalizedQuery),
+  );
+}
+
 type ConversationTextMessage = {
   role: "system" | "user" | "assistant";
   parts: Array<{ type: string; text?: string }>;

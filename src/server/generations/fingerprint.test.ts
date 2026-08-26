@@ -38,5 +38,11 @@ describe("fingerprintGenerationRequest", () => {
         knowledgeBaseIds: ["knowledge-base"],
       }),
     );
+    expect(fingerprintGenerationRequest(request)).not.toBe(
+      fingerprintGenerationRequest({
+        ...request,
+        reasoning: "high",
+      }),
+    );
   });
 });

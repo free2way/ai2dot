@@ -21,7 +21,6 @@ import {
   Menu,
   MessageSquareText,
   MoreHorizontal,
-  Paperclip,
   PanelRight,
   Pencil,
   Plus,
@@ -51,6 +50,7 @@ import type {
   ConversationBranch,
   ConversationListItem,
 } from "@/lib/conversations";
+import { filterConversations } from "@/lib/conversations";
 import type { KnowledgeBaseSummary } from "@/lib/knowledge";
 import {
   DEFAULT_MODEL_ID,
@@ -130,6 +130,8 @@ export function ChatWorkspace({
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const [input, setInput] = useState("");
+  const [conversationSearch, setConversationSearch] = useState("");
+  const [deepThinkingEnabled, setDeepThinkingEnabled] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState(
     models.some((model) => model.id === initialModelId)
       ? initialModelId!
@@ -177,6 +179,12 @@ export function ChatWorkspace({
   });
 
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? models[0];
+  const supportsDeepThinking = selectedModel?.capabilities.includes("reasoning") ?? false;
+  const useDeepThinking = deepThinkingEnabled && supportsDeepThinking;
+  const visibleConversations = useMemo(
+    () => filterConversations(conversationList, conversationSearch),
+    [conversationList, conversationSearch],
+  );
   const groupedModels = useMemo(() => {
     const groups = new Map<string, ModelCatalogEntry[]>();
     for (const model of models) {
@@ -408,6 +416,7 @@ export function ChatWorkspace({
             conversationId,
             branchId,
             idempotencyKey: crypto.randomUUID(),
+            reasoning: useDeepThinking ? "high" : "provider-default",
           },
         },
       );
@@ -512,7 +521,11 @@ export function ChatWorkspace({
     if (!persistenceEnabled || !activeConversationId || !activeBranchId) {
       await regenerate({
         messageId: assistantMessageId,
-        body: { modelId: selectedModelId, knowledgeBaseIds: selectedKnowledgeBaseIds },
+        body: {
+          modelId: selectedModelId,
+          knowledgeBaseIds: selectedKnowledgeBaseIds,
+          reasoning: useDeepThinking ? "high" : "provider-default",
+        },
       });
       return;
     }
@@ -560,6 +573,7 @@ export function ChatWorkspace({
           conversationId: activeConversationId,
           branchId: payload.branch.id,
           idempotencyKey: crypto.randomUUID(),
+          reasoning: useDeepThinking ? "high" : "provider-default",
         },
       });
     } catch (branchError) {
@@ -694,7 +708,12 @@ export function ChatWorkspace({
         </button>
         <label className="sidebar-search">
           <Search size={15} />
-          <input aria-label="搜索会话" placeholder="搜索会话" />
+          <input
+            aria-label="搜索会话"
+            placeholder="搜索会话"
+            value={conversationSearch}
+            onChange={(event) => setConversationSearch(event.target.value)}
+          />
         </label>
         <nav className="primary-nav" aria-label="主导航">
           <button className="nav-row is-active"><MessageSquareText size={17} /> 对话 <span>{conversationList.length || 1}</span></button>
@@ -702,9 +721,9 @@ export function ChatWorkspace({
           <Link className="nav-row" href="/knowledge"><Archive size={17} /> 知识库 <span>{initialKnowledgeBases.length}</span></Link>
           <Link className="nav-row" href="/admin"><Settings2 size={17} /> 模型管理</Link>
         </nav>
-        <div className="history-heading"><span>最近</span><History size={14} /></div>
+        <div className="history-heading"><span>{conversationSearch.trim() ? `搜索结果 ${visibleConversations.length}` : "最近"}</span><History size={14} /></div>
         <div className="history-list">
-          {conversationList.length > 0 ? conversationList.map((chat) => (
+          {visibleConversations.length > 0 ? visibleConversations.map((chat) => (
             <div className="history-item" data-menu-open={sessionMenuId === chat.id} key={chat.id}>
               {renamingConversationId === chat.id ? (
                 <form className="history-rename" onSubmit={(event) => void renameConversation(event, chat.id)}>
@@ -739,7 +758,7 @@ export function ChatWorkspace({
               )}
             </div>
           )) : (
-            <p className="history-empty">{persistenceEnabled ? "还没有云端会话" : "当前会话保存在此浏览器"}</p>
+            <p className="history-empty">{conversationSearch.trim() ? "没有找到匹配的会话" : persistenceEnabled ? "还没有云端会话" : "当前会话保存在此浏览器"}</p>
           )}
         </div>
         {sessionNotice && <div className="session-notice"><Check size={12} /><span>{sessionNotice}</span><button onClick={() => setSessionNotice(undefined)}><X size={12} /></button></div>}
@@ -849,12 +868,12 @@ export function ChatWorkspace({
         <footer className="composer-dock">
           <div className="composer-session-label">
             <span>继续这个会话</span>
-            <small>{contextCompacted ? "已携带滚动摘要与最近消息" : "自动携带当前会话上下文"}</small>
+            <small>{useDeepThinking ? "深度思考已开启 · 回答可能更慢" : contextCompacted ? "已携带滚动摘要与最近消息" : "自动携带当前会话上下文"}</small>
           </div>
           <form className="composer" onSubmit={handleSubmit}>
             <textarea ref={composerTextareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={`继续提问，或让${assistantName}完善上面的结果…`} rows={1} aria-label="消息" />
             <div className="composer-toolbar">
-              <div><button type="button" aria-label="添加附件"><Paperclip size={17} /></button><button type="button" className="tool-chip"><Sparkles size={14} /> 深度思考</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> 知识库 {selectedKnowledgeBases.length}</button>}</div>
+              <div><button type="button" className={`tool-chip${useDeepThinking ? " is-active" : ""}`} disabled={!supportsDeepThinking} aria-pressed={useDeepThinking} title={supportsDeepThinking ? "为下一次回答使用高强度推理" : "当前模型不支持深度思考"} onClick={() => setDeepThinkingEnabled((enabled) => !enabled)}><Sparkles size={14} /> 深度思考</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> 知识库 {selectedKnowledgeBases.length}</button>}</div>
               {isBusy ? (
                 <button className="send-button stop-button" type="button" onClick={stop} aria-label="停止生成"><Square size={14} fill="currentColor" /></button>
               ) : (

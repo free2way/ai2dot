@@ -1260,6 +1260,18 @@ textarea:focus-visible {
   background: var(--paper-2);
 }
 
+.composer-toolbar button:disabled {
+  color: #a4a69e;
+  cursor: not-allowed;
+  background: transparent;
+  opacity: 0.6;
+}
+
+.composer-toolbar button:disabled:hover {
+  color: #a4a69e;
+  background: transparent;
+}
+
 .composer-toolbar .tool-chip {
   border: 1px solid var(--line);
 }

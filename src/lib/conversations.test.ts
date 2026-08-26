@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { conversationToKnowledgeText } from "./conversations";
+import {
+  conversationToKnowledgeText,
+  filterConversations,
+} from "./conversations";
+
+describe("filterConversations", () => {
+  const conversations = [
+    { id: "1", title: "Oracle 部署脚本", updatedAt: "2026-08-26", archived: false },
+    { id: "2", title: "产品需求梳理", updatedAt: "2026-08-25", archived: false },
+  ];
+
+  it("matches titles without case sensitivity and ignores surrounding spaces", () => {
+    expect(filterConversations(conversations, "  ORACLE ")).toEqual([
+      conversations[0],
+    ]);
+  });
+
+  it("returns all conversations for an empty query", () => {
+    expect(filterConversations(conversations, "   ")).toBe(conversations);
+  });
+});
 
 describe("conversationToKnowledgeText", () => {
   it("exports every text turn in order", () => {
