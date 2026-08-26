@@ -1,0 +1,1 @@
+CREATE INDEX "generations_model_created_idx" ON "generations" USING btree ("model_id","created_at");

@@ -35,14 +35,16 @@ npm run db:migrate
 openssl rand -base64 32
 ```
 
-配置 `PROVIDER_SECRET_ENCRYPTION_KEY` 后即可添加连接并在线刷新模型目录。后台页面和 API 都会执行账户及工作区管理员权限检查。
+配置 `PROVIDER_SECRET_ENCRYPTION_KEY` 后即可添加连接并在线刷新模型目录。后台页面和 API 都会执行账户及工作区管理员权限检查，并显示最近 30 天用量、token、预估费用及供应商健康状态。
+
+云端聊天默认限制为每位用户每分钟 30 次请求，使用 Neon 原子计数保证多个 Vercel 实例之间口径一致。可以通过 `AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE` 调整为 1–300。
 
 ## 环境服务
 
 - AI：工作区自带的 OpenAI-compatible 供应商；Vercel AI Gateway 为可选能力
 - Auth：Clerk（两项 Clerk key 同时配置后启用）
 - Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型）
-- Cache/Rate limit：Upstash Redis（下一阶段接入）
+- Rate limit：Neon PostgreSQL 分钟窗口原子计数
 - Files：Vercel Blob（下一阶段接入）
 
 完整变量见 [`.env.example`](./.env.example)。数据库 schema 位于 `src/server/db/schema.ts`，SQL migration 位于 `drizzle/`。

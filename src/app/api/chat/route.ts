@@ -11,6 +11,7 @@ import {
 } from "ai";
 import { z } from "zod";
 import { DEFAULT_MODEL_ID, isFeaturedModel } from "@/lib/models";
+import { estimateUsageCostUsd } from "@/lib/operations";
 import { isClerkConfigured } from "@/server/auth/config";
 import { getRequestIdentity } from "@/server/auth/session";
 import { getAssistant } from "@/server/assistants/store";
@@ -46,7 +47,9 @@ import {
   type GenerationRecord,
 } from "@/server/generations/store";
 import { searchKnowledge } from "@/server/knowledge/store";
+import { logServerEvent } from "@/server/observability/log";
 import { resolveChatModel } from "@/server/providers/store";
+import { consumeChatRateLimit } from "@/server/rate-limit/chat";
 
 export const maxDuration = 60;
 
@@ -87,12 +90,14 @@ function createTextResponse({
   mode,
   generationId,
   onComplete,
+  headers,
 }: {
   messages: UIMessage[];
   text: string;
   mode: "demo" | "replay";
   generationId?: string;
   onComplete?: (responseMessage: UIMessage) => Promise<void>;
+  headers?: Record<string, string>;
 }) {
   const stream = createUIMessageStream({
     originalMessages: messages,
@@ -119,6 +124,7 @@ function createTextResponse({
     headers: {
       "x-ai2dot-mode": mode,
       ...(generationId ? { "x-ai2dot-generation-id": generationId } : {}),
+      ...headers,
     },
   });
 }
@@ -155,7 +161,18 @@ function generationError(
 }
 
 export async function POST(request: Request) {
-  const parsed = chatRequestSchema.safeParse(await request.json());
+  const requestStartedAt = Date.now();
+  const requestLogId = request.headers.get("x-vercel-id") ?? crypto.randomUUID();
+  let requestBody: unknown;
+  try {
+    requestBody = await request.json();
+  } catch {
+    return Response.json(
+      { code: "INVALID_REQUEST", message: "消息格式不正确。" },
+      { status: 400 },
+    );
+  }
+  const parsed = chatRequestSchema.safeParse(requestBody);
   if (!parsed.success) {
     return Response.json(
       { code: "INVALID_REQUEST", message: "消息格式不正确。" },
@@ -207,8 +224,59 @@ export async function POST(request: Request) {
     );
   }
 
+  let rateLimitHeaders: Record<string, string> = {};
+  if (workspaceContext) {
+    try {
+      const rateLimit = await consumeChatRateLimit(workspaceContext);
+      rateLimitHeaders = {
+        "x-ratelimit-limit": String(rateLimit.limit),
+        "x-ratelimit-remaining": String(rateLimit.remaining),
+        "x-ratelimit-reset": String(Math.ceil(rateLimit.resetAt / 1_000)),
+      };
+      if (!rateLimit.allowed) {
+        logServerEvent("warn", "chat.rate_limited", {
+          requestId: requestLogId,
+          workspaceId: workspaceContext.workspaceId,
+          userId: workspaceContext.userId,
+          limit: rateLimit.limit,
+        });
+        return Response.json(
+          {
+            code: "RATE_LIMITED",
+            message: `请求过于频繁，请在 ${rateLimit.retryAfterSeconds} 秒后重试。`,
+          },
+          {
+            status: 429,
+            headers: {
+              ...rateLimitHeaders,
+              "retry-after": String(rateLimit.retryAfterSeconds),
+            },
+          },
+        );
+      }
+    } catch (error) {
+      logServerEvent("error", "chat.rate_limit_failed", {
+        requestId: requestLogId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return Response.json(
+        { code: "RATE_LIMIT_UNAVAILABLE", message: "请求保护服务暂时不可用。" },
+        { status: 503 },
+      );
+    }
+  }
+
+  logServerEvent("info", "chat.accepted", {
+    requestId: requestLogId,
+    modelId,
+    conversationId: parsed.data.conversationId,
+    knowledgeBaseCount: parsed.data.knowledgeBaseIds.length,
+    reasoning: parsed.data.reasoning,
+  });
+
   let languageModel: string | LanguageModel = modelId;
   let databaseModelId: string | undefined;
+  let modelPricing: Record<string, string> | null | undefined;
   let modelAvailable = isFeaturedModel(modelId)
     ? gatewayConfigured &&
       (!isClerkConfigured() || Boolean(requestIdentity))
@@ -236,6 +304,7 @@ export async function POST(request: Request) {
       databaseModelId = resolved.databaseModelId;
       modelAvailable = resolved.available;
       gatewayRouted = resolved.gatewayRouted;
+      modelPricing = resolved.pricing;
       responseMode = "provider";
     } catch {
       return Response.json(
@@ -289,6 +358,7 @@ export async function POST(request: Request) {
         text: getMessageText(begun.message),
         mode: "replay",
         generationId: begun.generation.id,
+        headers: rateLimitHeaders,
       });
     }
     if (begun.kind !== "created") {
@@ -336,6 +406,11 @@ export async function POST(request: Request) {
       modelId,
     });
     const latencyMs = Date.now() - startedAt;
+    const estimatedCostUsd = estimateUsageCostUsd(
+      modelPricing,
+      usage.inputTokens,
+      usage.outputTokens,
+    );
     await completeGeneration({
       context: persistence.context,
       generationId: persistence.generation.id,
@@ -351,8 +426,19 @@ export async function POST(request: Request) {
       modelId: databaseModelId,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
+      costUsd: estimatedCostUsd.toFixed(8),
       latencyMs,
       status: "completed",
+    });
+    logServerEvent("info", "chat.completed", {
+      requestId: requestLogId,
+      generationId: persistence.generation.id,
+      workspaceId: persistence.context.workspaceId,
+      modelId,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      estimatedCostUsd,
+      latencyMs,
     });
   };
 
@@ -424,6 +510,7 @@ export async function POST(request: Request) {
       text: demoText,
       mode: "demo",
       generationId: persistence?.generation.id,
+      headers: rateLimitHeaders,
       async onComplete(responseMessage) {
         await persistCompleted([...messages, responseMessage], responseMessage, undefined, startedAt);
       },
@@ -469,11 +556,22 @@ export async function POST(request: Request) {
       : {}),
     abortSignal: request.signal,
     onError({ error }) {
+      logServerEvent("error", "chat.failed", {
+        requestId: requestLogId,
+        modelId,
+        error: error instanceof Error ? error.message : String(error),
+        latencyMs: Date.now() - requestStartedAt,
+      });
       if (persistence) {
         void failGeneration(persistence.context, persistence.generation.id, error);
       }
     },
     onAbort() {
+      logServerEvent("info", "chat.stopped", {
+        requestId: requestLogId,
+        modelId,
+        latencyMs: Date.now() - requestStartedAt,
+      });
       if (persistence) {
         void stopGeneration(persistence.context, persistence.generation.id);
       }
@@ -512,6 +610,7 @@ export async function POST(request: Request) {
         ? { "x-ai2dot-generation-id": persistence.generation.id }
         : {}),
       "x-ai2dot-context-compacted": String(contextWasCompacted),
+      ...rateLimitHeaders,
     },
   });
 }

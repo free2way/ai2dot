@@ -167,6 +167,7 @@ export async function resolveChatModel(
       connectionType: providerConnections.type,
       baseUrl: providerConnections.baseUrl,
       encryptedSecret: providerConnections.encryptedSecret,
+      pricing: models.pricing,
     })
     .from(models)
     .innerJoin(
@@ -195,6 +196,7 @@ export async function resolveChatModel(
       databaseModelId: record.id,
       available: isAiGatewayConfigured(),
       gatewayRouted: true,
+      pricing: record.pricing,
     };
   }
 
@@ -219,6 +221,7 @@ export async function resolveChatModel(
     databaseModelId: record.id,
     available: Boolean(secret) || record.connectionType !== "gateway",
     gatewayRouted: false,
+    pricing: record.pricing,
   };
 }
 

@@ -373,6 +373,7 @@ export const generations = pgTable(
       table.createdAt,
     ),
     index("generations_status_updated_idx").on(table.status, table.updatedAt),
+    index("generations_model_created_idx").on(table.modelId, table.createdAt),
   ],
 );
 
@@ -408,4 +409,22 @@ export const usageEvents = pgTable(
       table.createdAt,
     ),
   ],
+);
+
+export const chatRateLimits = pgTable(
+  "chat_rate_limits",
+  {
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    requestCount: integer("request_count").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.workspaceId, table.userId] })],
 );

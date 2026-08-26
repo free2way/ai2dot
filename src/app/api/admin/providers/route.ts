@@ -5,6 +5,7 @@ import {
   listProviderConnections,
   listProviderModels,
 } from "@/server/providers/store";
+import { getWorkspaceOperations } from "@/server/operations/store";
 
 const providerSchema = z
   .object({
@@ -22,11 +23,12 @@ export async function GET() {
   const context = await getAdminWorkspaceContext();
   if (!context) return Response.json({ code: "FORBIDDEN" }, { status: 403 });
 
-  const [providers, models] = await Promise.all([
+  const [providers, models, operations] = await Promise.all([
     listProviderConnections(context),
     listProviderModels(context),
+    getWorkspaceOperations(context),
   ]);
-  return Response.json({ providers, models });
+  return Response.json({ providers, models, operations });
 }
 
 export async function POST(request: Request) {

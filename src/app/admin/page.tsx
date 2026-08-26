@@ -5,6 +5,7 @@ import {
   getAdminWorkspaceContext,
   isPersistenceConfigured,
 } from "@/server/db/workspace";
+import { getWorkspaceOperations } from "@/server/operations/store";
 import {
   listProviderConnections,
   listProviderModels,
@@ -33,9 +34,10 @@ export default async function AdminPage() {
   const context = await getAdminWorkspaceContext();
   if (!context) redirect("/sign-in");
 
-  const [providers, models] = await Promise.all([
+  const [providers, models, operations] = await Promise.all([
     listProviderConnections(context),
     listProviderModels(context),
+    getWorkspaceOperations(context),
   ]);
 
   return (
@@ -44,6 +46,7 @@ export default async function AdminPage() {
       configuration={configuration}
       initialProviders={providers}
       initialModels={models}
+      initialOperations={operations}
     />
   );
 }

@@ -1,8 +1,11 @@
 "use client";
 
 import {
+  Activity,
   ArrowLeft,
+  BarChart3,
   Check,
+  CircleDollarSign,
   CloudCog,
   Database,
   Eye,
@@ -20,6 +23,11 @@ import {
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { BrandMark } from "@/components/brand-mark";
+import {
+  EMPTY_OPERATIONS_OVERVIEW,
+  type ProviderHealthStatus,
+  type WorkspaceOperationsOverview,
+} from "@/lib/operations";
 
 type ProviderSummary = {
   id: string;
@@ -52,6 +60,7 @@ type Props = {
   };
   initialProviders?: ProviderSummary[];
   initialModels?: ProviderModelSummary[];
+  initialOperations?: WorkspaceOperationsOverview;
 };
 
 type ProviderTemplate = {
@@ -121,11 +130,28 @@ const EMPTY_FORM: ProviderForm = {
   enabled: true,
 };
 
+const HEALTH_LABELS: Record<ProviderHealthStatus, string> = {
+  healthy: "稳定",
+  degraded: "波动",
+  unavailable: "异常",
+  ready: "已连接",
+  unknown: "待检测",
+  disabled: "已停用",
+};
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat("zh-CN", {
+    notation: value >= 10_000 ? "compact" : "standard",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 export function ProviderManager({
   infrastructureReady,
   configuration,
   initialProviders = [],
   initialModels = [],
+  initialOperations = EMPTY_OPERATIONS_OVERVIEW,
 }: Props) {
   const [providers, setProviders] = useState(initialProviders);
   const [models, setModels] = useState(initialModels);
@@ -139,6 +165,7 @@ export function ProviderManager({
   const [modelSearch, setModelSearch] = useState("");
   const [busyId, setBusyId] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [operations, setOperations] = useState(initialOperations);
 
   const selectedProvider =
     providers.find((provider) => provider.id === selectedProviderId) ??
@@ -153,6 +180,10 @@ export function ProviderManager({
           model.providerModelId.toLowerCase().includes(query)),
     );
   }, [modelSearch, models, selectedProvider]);
+  const providerHealthById = useMemo(
+    () => new Map(operations.providers.map((health) => [health.connectionId, health])),
+    [operations.providers],
+  );
 
   const refreshProviders = async () => {
     const response = await fetch("/api/admin/providers", { cache: "no-store" });
@@ -160,9 +191,11 @@ export function ProviderManager({
     const payload = (await response.json()) as {
       providers: ProviderSummary[];
       models: ProviderModelSummary[];
+      operations: WorkspaceOperationsOverview;
     };
     setProviders(payload.providers);
     setModels(payload.models);
+    setOperations(payload.operations);
     setSelectedProviderId((current) =>
       payload.providers.some((provider) => provider.id === current)
         ? current
@@ -338,6 +371,21 @@ export function ProviderManager({
           </section>
         )}
 
+        {infrastructureReady && (
+          <section className="operations-overview" aria-label="模型用量概览">
+            <div className="operations-heading">
+              <div><p className="eyebrow">WORKSPACE USAGE</p><h2>运行概览</h2></div>
+              <small>过去 {operations.periodDays} 天 · 每位用户每分钟 {operations.rateLimitPerMinute} 次请求</small>
+            </div>
+            <div className="operations-metrics">
+              <div><span><BarChart3 size={15} /> 请求</span><strong>{formatCompactNumber(operations.requestCount)}</strong><small>{operations.successRate}% 成功</small></div>
+              <div><span><Activity size={15} /> 平均耗时</span><strong>{operations.averageLatencyMs ? `${(operations.averageLatencyMs / 1_000).toFixed(1)}s` : "—"}</strong><small>已完成生成</small></div>
+              <div><span><CloudCog size={15} /> Token</span><strong>{formatCompactNumber(operations.inputTokens + operations.outputTokens)}</strong><small>{formatCompactNumber(operations.inputTokens)} 输入 · {formatCompactNumber(operations.outputTokens)} 输出</small></div>
+              <div><span><CircleDollarSign size={15} /> 预估费用</span><strong>${operations.estimatedCostUsd.toFixed(4)}</strong><small>按模型目录单价估算</small></div>
+            </div>
+          </section>
+        )}
+
         <section className="provider-quickstart" aria-label="供应商快捷模板">
           <div className="provider-section-heading">
             <div><p className="eyebrow">DIRECT CONNECTION</p><h2>选择接入方式</h2></div>
@@ -365,24 +413,31 @@ export function ProviderManager({
         </section>
 
         <section className="provider-table" aria-label="供应商列表">
-          <div className="provider-table-head"><span>连接</span><span>目录状态</span><span>安全</span><span>操作</span></div>
+          <div className="provider-table-head"><span>连接</span><span>健康 / 目录</span><span>安全</span><span>操作</span></div>
           {providers.length === 0 ? (
             <div className="provider-empty"><ServerCog size={24} /><strong>还没有供应商连接</strong><p>从上方选择模板，填写 API Key 后自动测试并同步模型。</p></div>
-          ) : providers.map((provider) => (
-            <div className="provider-row" data-selected={selectedProvider?.id === provider.id} key={provider.id}>
-              <button className="provider-main" onClick={() => setSelectedProviderId(provider.id)}>
-                <i data-enabled={provider.enabled} />
-                <span><strong>{provider.name}</strong><small>{provider.baseUrl ?? "托管接口"}</small></span>
-              </button>
-              <div><strong>{provider.modelCount} 个模型</strong><small>{provider.lastSyncedAt ? `更新于 ${new Date(provider.lastSyncedAt).toLocaleString("zh-CN")}` : "等待首次同步"}</small></div>
-              <div className="provider-security">{provider.secretConfigured ? <><Check size={14} /> 服务端加密</> : "未配置密钥"}</div>
-              <div className="provider-actions">
-                <button title="测试连接并同步模型" disabled={Boolean(busyId)} onClick={() => void syncProvider(provider.id)}><RefreshCw className={busyId === provider.id ? "is-spinning" : ""} size={15} /></button>
-                <button title="修改配置" disabled={Boolean(busyId)} onClick={() => openEdit(provider)}><Pencil size={14} /></button>
-                <button className="is-danger" title="删除供应商" disabled={Boolean(busyId)} onClick={() => void deleteProvider(provider)}><Trash2 size={14} /></button>
+          ) : providers.map((provider) => {
+            const health = providerHealthById.get(provider.id);
+            const healthStatus = health?.status ?? (provider.enabled ? "unknown" : "disabled");
+            return (
+              <div className="provider-row" data-selected={selectedProvider?.id === provider.id} key={provider.id}>
+                <button className="provider-main" onClick={() => setSelectedProviderId(provider.id)}>
+                  <i data-enabled={provider.enabled} />
+                  <span><strong>{provider.name}</strong><small>{provider.baseUrl ?? "托管接口"}</small></span>
+                </button>
+                <div className="provider-health-cell">
+                  <strong data-health={healthStatus}><i /> {HEALTH_LABELS[healthStatus]}</strong>
+                  <small>{health?.requestCount ? `${health.requestCount} 次调用 · ${health.averageLatencyMs ? `${(health.averageLatencyMs / 1_000).toFixed(1)}s` : "等待耗时"}` : `${provider.modelCount} 个模型`}</small>
+                </div>
+                <div className="provider-security">{provider.secretConfigured ? <><Check size={14} /> 服务端加密</> : "未配置密钥"}</div>
+                <div className="provider-actions">
+                  <button title="测试连接并同步模型" disabled={Boolean(busyId)} onClick={() => void syncProvider(provider.id)}><RefreshCw className={busyId === provider.id ? "is-spinning" : ""} size={15} /></button>
+                  <button title="修改配置" disabled={Boolean(busyId)} onClick={() => openEdit(provider)}><Pencil size={14} /></button>
+                  <button className="is-danger" title="删除供应商" disabled={Boolean(busyId)} onClick={() => void deleteProvider(provider)}><Trash2 size={14} /></button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </section>
 
         <section className="model-operations">
