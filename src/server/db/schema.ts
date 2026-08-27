@@ -243,6 +243,10 @@ export const knowledgeChunks = pgTable(
       table.chunkIndex,
     ),
     index("knowledge_chunks_base_idx").on(table.knowledgeBaseId),
+    index("knowledge_chunks_content_trgm_idx").using(
+      "gin",
+      table.content.op("gin_trgm_ops"),
+    ),
   ],
 );
 

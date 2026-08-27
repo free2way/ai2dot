@@ -24,6 +24,7 @@ export type KnowledgeSearchResult = {
   chunkId: string;
   documentId: string;
   documentName: string;
+  mimeType: string;
   knowledgeBaseId: string;
   knowledgeBaseName: string;
   content: string;

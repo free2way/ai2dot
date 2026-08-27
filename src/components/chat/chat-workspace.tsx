@@ -14,6 +14,7 @@ import {
   CircleHelp,
   Clock3,
   Copy,
+  FileSearch,
   FileText,
   Gauge,
   GitBranch,
@@ -46,6 +47,7 @@ import {
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { BrandMark } from "@/components/brand-mark";
 import { MarkdownContent } from "@/components/chat/markdown-content";
+import { getKnowledgeSourceParts } from "@/lib/chat-sources";
 import type {
   ConversationBranch,
   ConversationListItem,
@@ -110,6 +112,25 @@ function formatConversationTime(value: string) {
     return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
+
+function MessageKnowledgeSources({ message }: { message: UIMessage }) {
+  const sources = getKnowledgeSourceParts(message);
+  if (sources.length === 0) return null;
+
+  return (
+    <div className="message-knowledge-sources">
+      <span><FileSearch size={13} /> 参考资料</span>
+      <div>
+        {sources.map((source) => (
+          <Link href="/knowledge" key={source.sourceId} title="在知识库中查看">
+            <FileText size={13} />
+            <span>{source.title}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function ChatWorkspace({
@@ -834,6 +855,7 @@ export function ChatWorkspace({
                     {message.parts.map((part, partIndex) => part.type === "text" ? <MarkdownContent key={`${message.id}-${partIndex}`}>{part.text}</MarkdownContent> : null)}
                     {isBusy && messageIndex === messages.length - 1 && message.role === "assistant" && <span className="stream-caret" />}
                   </div>
+                  <MessageKnowledgeSources message={message} />
                   {message.role === "assistant" && message.id !== "dot-welcome" && (
                     <div className="message-actions">
                       <button onClick={() => navigator.clipboard.writeText(message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n"))}><Copy size={14} /> 复制</button>

@@ -1,6 +1,6 @@
 # ai2dot
 
-一个面向个人与小团队的云端、多租户 AI 聚合工作台。当前版本具备响应式 Chat UI、AI SDK 流式协议、多模型切换、Clerk 登录、Neon 云端会话、供应商后台、Generation 可靠性记录、非覆盖式对话分支以及无密钥演示模式。
+一个面向个人与小团队的云端、多租户 AI 聚合工作台。当前版本具备响应式 Chat UI、AI SDK 流式协议、多模型切换、Clerk 登录、Neon 云端会话、供应商后台、Generation 可靠性记录、非覆盖式对话分支、知识库检索以及无密钥演示模式。
 
 ## 本地启动
 
@@ -39,13 +39,19 @@ openssl rand -base64 32
 
 云端聊天默认限制为每位用户每分钟 30 次请求，使用 Neon 原子计数保证多个 Vercel 实例之间口径一致。可以通过 `AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE` 调整为 1–300。
 
+## 知识库
+
+登录后访问 `/knowledge`，可以按主题创建知识库并导入 PDF、DOCX、TXT、Markdown、CSV 或 JSON；单文件上限 4MB，PDF 上限 200 页。上传接口返回后会继续在后台解析和分块，页面自动刷新处理状态。
+
+检索使用 Neon PostgreSQL `pg_trgm` 候选召回与应用层相关度、文档多样性排序。对话启用知识库后，命中的文档会作为结构化来源随回答一起保存，并显示在回答下方；重新打开历史会话或进行幂等回放时引用仍然存在。
+
 ## 环境服务
 
 - AI：工作区自带的 OpenAI-compatible 供应商；Vercel AI Gateway 为可选能力
 - Auth：Clerk（两项 Clerk key 同时配置后启用）
-- Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型）
+- Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型、知识库）
 - Rate limit：Neon PostgreSQL 分钟窗口原子计数
-- Files：Vercel Blob（下一阶段接入）
+- Documents：文档提取后按片段存入 Neon；当前不保留原始上传文件
 
 完整变量见 [`.env.example`](./.env.example)。数据库 schema 位于 `src/server/db/schema.ts`，SQL migration 位于 `drizzle/`。
 

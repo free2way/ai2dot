@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import type {
   KnowledgeBaseSummary,
   KnowledgeDocumentSummary,
@@ -54,7 +54,7 @@ export function splitKnowledgeText(source: string) {
   return chunks;
 }
 
-function searchTerms(query: string) {
+export function getKnowledgeSearchTerms(query: string) {
   const normalized = query.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   const latinTerms = normalized.split(/\s+/).filter((term) => term.length >= 2);
   const chineseRuns = query.match(/[\p{Script=Han}]+/gu) ?? [];
@@ -69,7 +69,7 @@ function searchTerms(query: string) {
 
 export function scoreKnowledgeText(content: string, query: string) {
   const haystack = content.toLowerCase();
-  const terms = searchTerms(query);
+  const terms = getKnowledgeSearchTerms(query);
   if (terms.length === 0) return 0;
   let matches = 0;
   for (const term of terms) {
@@ -77,6 +77,29 @@ export function scoreKnowledgeText(content: string, query: string) {
   }
   const phraseBonus = haystack.includes(query.trim().toLowerCase()) ? 2 : 0;
   return Number(((matches + phraseBonus) / (terms.length + 2)).toFixed(4));
+}
+
+export function rankKnowledgeResults(
+  rows: Omit<KnowledgeSearchResult, "score">[],
+  query: string,
+  limit: number,
+) {
+  const ranked = rows
+    .map((row) => ({ ...row, score: scoreKnowledgeText(row.content, query) }))
+    .filter((row) => row.score > 0)
+    .sort((left, right) => right.score - left.score);
+  const selected: KnowledgeSearchResult[] = [];
+  const perDocument = new Map<string, number>();
+
+  for (const row of ranked) {
+    const documentCount = perDocument.get(row.documentId) ?? 0;
+    if (documentCount >= 2) continue;
+    selected.push(row);
+    perDocument.set(row.documentId, documentCount + 1);
+    if (selected.length >= Math.min(limit, 10)) break;
+  }
+
+  return selected;
 }
 
 export async function listKnowledgeBases(
@@ -216,6 +239,25 @@ export async function addKnowledgeDocument(
     content: string;
   },
 ) {
+  const document = await createKnowledgeDocument(context, input);
+  if (!document) return null;
+  const indexed = await indexKnowledgeDocument(context, {
+    knowledgeBaseId: input.knowledgeBaseId,
+    documentId: document.id,
+    content: input.content,
+  });
+  return indexed;
+}
+
+export async function createKnowledgeDocument(
+  context: WorkspaceContext,
+  input: {
+    knowledgeBaseId: string;
+    name: string;
+    mimeType: string;
+    byteSize: number;
+  },
+) {
   const db = getDb();
   const [ownedBase] = await db
     .select({ id: knowledgeBases.id })
@@ -229,9 +271,6 @@ export async function addKnowledgeDocument(
     .limit(1);
   if (!ownedBase) return null;
 
-  const chunks = splitKnowledgeText(input.content);
-  if (chunks.length === 0) throw new Error("文档没有可索引的文本内容。");
-
   const [document] = await db
     .insert(knowledgeDocuments)
     .values({
@@ -239,16 +278,48 @@ export async function addKnowledgeDocument(
       name: input.name,
       mimeType: input.mimeType,
       byteSize: input.byteSize,
-      characterCount: input.content.length,
+      characterCount: 0,
       status: "processing",
     })
     .returning({ id: knowledgeDocuments.id });
+
+  return document;
+}
+
+export async function indexKnowledgeDocument(
+  context: WorkspaceContext,
+  input: {
+    knowledgeBaseId: string;
+    documentId: string;
+    content: string;
+  },
+) {
+  const db = getDb();
+  const [ownedDocument] = await db
+    .select({ id: knowledgeDocuments.id })
+    .from(knowledgeDocuments)
+    .innerJoin(
+      knowledgeBases,
+      eq(knowledgeBases.id, knowledgeDocuments.knowledgeBaseId),
+    )
+    .where(
+      and(
+        eq(knowledgeDocuments.id, input.documentId),
+        eq(knowledgeDocuments.knowledgeBaseId, input.knowledgeBaseId),
+        eq(knowledgeBases.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!ownedDocument) throw new Error("知识库文档不存在。");
+
+  const chunks = splitKnowledgeText(input.content);
+  if (chunks.length === 0) throw new Error("文档没有可索引的文本内容。");
 
   try {
     await db.insert(knowledgeChunks).values(
       chunks.map((content, chunkIndex) => ({
         knowledgeBaseId: input.knowledgeBaseId,
-        documentId: document.id,
+        documentId: input.documentId,
         chunkIndex,
         content,
         tokenEstimate: Math.ceil(content.length / 2.5),
@@ -256,8 +327,13 @@ export async function addKnowledgeDocument(
     );
     await db
       .update(knowledgeDocuments)
-      .set({ status: "ready", updatedAt: new Date() })
-      .where(eq(knowledgeDocuments.id, document.id));
+      .set({
+        characterCount: input.content.length,
+        status: "ready",
+        errorMessage: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeDocuments.id, input.documentId));
     await db
       .update(knowledgeBases)
       .set({ updatedAt: new Date() })
@@ -270,11 +346,47 @@ export async function addKnowledgeDocument(
         errorMessage: error instanceof Error ? error.message.slice(0, 500) : "索引失败",
         updatedAt: new Date(),
       })
-      .where(eq(knowledgeDocuments.id, document.id));
+      .where(eq(knowledgeDocuments.id, input.documentId));
     throw error;
   }
 
-  return { id: document.id, chunkCount: chunks.length };
+  return { id: input.documentId, chunkCount: chunks.length };
+}
+
+export async function failKnowledgeDocument(
+  context: WorkspaceContext,
+  input: { knowledgeBaseId: string; documentId: string; error: unknown },
+) {
+  const [ownedDocument] = await getDb()
+    .select({ id: knowledgeDocuments.id })
+    .from(knowledgeDocuments)
+    .innerJoin(
+      knowledgeBases,
+      eq(knowledgeBases.id, knowledgeDocuments.knowledgeBaseId),
+    )
+    .where(
+      and(
+        eq(knowledgeDocuments.id, input.documentId),
+        eq(knowledgeDocuments.knowledgeBaseId, input.knowledgeBaseId),
+        eq(knowledgeBases.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!ownedDocument) return null;
+
+  const [updated] = await getDb()
+    .update(knowledgeDocuments)
+    .set({
+      status: "failed",
+      errorMessage:
+        input.error instanceof Error
+          ? input.error.message.slice(0, 500)
+          : "文档解析失败。",
+      updatedAt: new Date(),
+    })
+    .where(eq(knowledgeDocuments.id, input.documentId))
+    .returning({ id: knowledgeDocuments.id });
+  return updated ?? null;
 }
 
 export async function deleteKnowledgeDocument(
@@ -313,6 +425,8 @@ export async function searchKnowledge(
 ): Promise<KnowledgeSearchResult[]> {
   if (knowledgeBaseIds.length === 0 || !query.trim()) return [];
   const uniqueIds = [...new Set(knowledgeBaseIds)].slice(0, 3);
+  const terms = getKnowledgeSearchTerms(query).slice(0, 16);
+  if (terms.length === 0) return [];
   const rows = await getDb()
     .select({
       chunkId: knowledgeChunks.id,
@@ -320,6 +434,7 @@ export async function searchKnowledge(
       documentName: knowledgeDocuments.name,
       knowledgeBaseId: knowledgeBases.id,
       knowledgeBaseName: knowledgeBases.name,
+      mimeType: knowledgeDocuments.mimeType,
       content: knowledgeChunks.content,
     })
     .from(knowledgeChunks)
@@ -336,14 +451,10 @@ export async function searchKnowledge(
         eq(knowledgeBases.workspaceId, context.workspaceId),
         eq(knowledgeDocuments.status, "ready"),
         inArray(knowledgeBases.id, uniqueIds),
+        or(...terms.map((term) => ilike(knowledgeChunks.content, `%${term}%`))),
       ),
     )
-    .orderBy(asc(knowledgeChunks.chunkIndex))
-    .limit(800);
+    .limit(1_600);
 
-  return rows
-    .map((row) => ({ ...row, score: scoreKnowledgeText(row.content, query) }))
-    .filter((row) => row.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, Math.min(limit, 10));
+  return rankKnowledgeResults(rows, query, limit);
 }

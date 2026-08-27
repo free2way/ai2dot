@@ -57,6 +57,13 @@
       "when": 1787747133116,
       "tag": "0007_chunky_raider",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787748428222,
+      "tag": "0008_confused_piledriver",
+      "breakpoints": true
     }
   ]
 }

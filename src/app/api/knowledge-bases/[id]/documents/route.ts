@@ -1,8 +1,19 @@
+import { after } from "next/server";
 import { getWorkspaceContext } from "@/server/db/workspace";
-import { addKnowledgeDocument } from "@/server/knowledge/store";
+import {
+  extractKnowledgeFileContent,
+  MAX_KNOWLEDGE_FILE_SIZE,
+  resolveKnowledgeFileKind,
+  sanitizeKnowledgeFileName,
+} from "@/server/knowledge/extract";
+import {
+  createKnowledgeDocument,
+  failKnowledgeDocument,
+  indexKnowledgeDocument,
+} from "@/server/knowledge/store";
+import { logServerEvent } from "@/server/observability/log";
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024;
-const SUPPORTED_EXTENSIONS = /\.(txt|md|markdown|csv|json)$/i;
+export const maxDuration = 60;
 
 export async function POST(
   request: Request,
@@ -19,19 +30,31 @@ export async function POST(
   let name: string;
   let mimeType: string;
   let byteSize: number;
-  let content: string;
+  let content: string | undefined;
+  let fileBytes: Uint8Array | undefined;
+  let fileKind: ReturnType<typeof resolveKnowledgeFileKind> = null;
 
   if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_FILE_SIZE) {
-      return Response.json({ message: "单个文件不能超过 2MB。" }, { status: 413 });
+    if (file.size > MAX_KNOWLEDGE_FILE_SIZE) {
+      return Response.json({ message: "单个文件不能超过 4MB。" }, { status: 413 });
     }
-    if (!SUPPORTED_EXTENSIONS.test(file.name) && !file.type.startsWith("text/")) {
-      return Response.json({ message: "当前支持 TXT、Markdown、CSV 和 JSON 文件。" }, { status: 415 });
+    fileKind = resolveKnowledgeFileKind(file.name, file.type);
+    if (!fileKind) {
+      return Response.json(
+        { message: "当前支持 PDF、DOCX、TXT、Markdown、CSV 和 JSON 文件。" },
+        { status: 415 },
+      );
     }
-    name = file.name.slice(0, 160);
-    mimeType = file.type || "text/plain";
+    name = sanitizeKnowledgeFileName(file.name) || "未命名文档";
+    mimeType =
+      file.type ||
+      (fileKind === "pdf"
+        ? "application/pdf"
+        : fileKind === "docx"
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "text/plain");
     byteSize = file.size;
-    content = await file.text();
+    fileBytes = new Uint8Array(await file.arrayBuffer());
   } else {
     if (!pastedName || !pastedContent) {
       return Response.json({ message: "请输入文档名称和正文。" }, { status: 400 });
@@ -43,15 +66,57 @@ export async function POST(
   }
 
   try {
-    const document = await addKnowledgeDocument(context, {
+    const document = await createKnowledgeDocument(context, {
       knowledgeBaseId: id,
       name,
       mimeType,
       byteSize,
-      content,
     });
     if (!document) return Response.json({ message: "知识库不存在。" }, { status: 404 });
-    return Response.json({ document }, { status: 201 });
+
+    const indexDocument = async () => {
+      const startedAt = Date.now();
+      try {
+        const extractedContent =
+          content ??
+          (fileBytes && fileKind
+            ? await extractKnowledgeFileContent({ bytes: fileBytes, kind: fileKind })
+            : "");
+        const indexed = await indexKnowledgeDocument(context, {
+          knowledgeBaseId: id,
+          documentId: document.id,
+          content: extractedContent,
+        });
+        logServerEvent("info", "knowledge.document_indexed", {
+          workspaceId: context.workspaceId,
+          knowledgeBaseId: id,
+          documentId: document.id,
+          mimeType,
+          chunkCount: indexed.chunkCount,
+          latencyMs: Date.now() - startedAt,
+        });
+      } catch (error) {
+        await failKnowledgeDocument(context, {
+          knowledgeBaseId: id,
+          documentId: document.id,
+          error,
+        });
+        logServerEvent("error", "knowledge.document_failed", {
+          workspaceId: context.workspaceId,
+          knowledgeBaseId: id,
+          documentId: document.id,
+          mimeType,
+          error: error instanceof Error ? error.message : String(error),
+          latencyMs: Date.now() - startedAt,
+        });
+      }
+    };
+
+    after(indexDocument);
+    return Response.json(
+      { document: { ...document, status: "processing" } },
+      { status: 202 },
+    );
   } catch (error) {
     return Response.json(
       { message: error instanceof Error ? error.message : "文档索引失败。" },

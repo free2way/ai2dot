@@ -6,10 +6,12 @@ import {
   streamText,
   toUIMessageStream,
   type LanguageModel,
+  type SourceDocumentUIPart,
   type UIMessage,
   validateUIMessages,
 } from "ai";
 import { z } from "zod";
+import { createKnowledgeSourceParts } from "@/lib/chat-sources";
 import { DEFAULT_MODEL_ID, isFeaturedModel } from "@/lib/models";
 import { estimateUsageCostUsd } from "@/lib/operations";
 import { isClerkConfigured } from "@/server/auth/config";
@@ -91,6 +93,7 @@ function createTextResponse({
   generationId,
   onComplete,
   headers,
+  sources = [],
 }: {
   messages: UIMessage[];
   text: string;
@@ -98,11 +101,13 @@ function createTextResponse({
   generationId?: string;
   onComplete?: (responseMessage: UIMessage) => Promise<void>;
   headers?: Record<string, string>;
+  sources?: SourceDocumentUIPart[];
 }) {
   const stream = createUIMessageStream({
     originalMessages: messages,
     generateId: createIdGenerator({ prefix: "msg", size: 20 }),
     async execute({ writer }) {
+      for (const source of sources) writer.write(source);
       const textId = crypto.randomUUID();
       writer.write({ type: "text-start", id: textId });
       const chunkSize = mode === "demo" ? 12 : Math.max(text.length, 1);
@@ -356,6 +361,10 @@ export async function POST(request: Request) {
       return createTextResponse({
         messages,
         text: getMessageText(begun.message),
+        sources: begun.message.parts.filter(
+          (part): part is SourceDocumentUIPart =>
+            part.type === "source-document",
+        ),
         mode: "replay",
         generationId: begun.generation.id,
         headers: rateLimitHeaders,
@@ -533,6 +542,7 @@ export async function POST(request: Request) {
     : parsed.data.knowledgeBaseIds.length > 0
       ? "\n\n用户启用了知识库，但本次问题没有检索到相关资料。不要声称已从知识库找到答案。"
       : "";
+  const knowledgeSources = createKnowledgeSourceParts(knowledgeResults);
   const summaryPrompt = buildConversationSummaryPrompt(conversationSummary);
   const assistantPrompt = assistantContext?.systemPrompt.trim()
     ? `\n\n你正在以工作区助手“${assistantContext.name}”的身份工作。以下是该助手的受信任配置，请遵守它，同时仍需服从前面的平台级要求。\n\n<assistant_instructions>\n${assistantContext.systemPrompt}\n</assistant_instructions>`
@@ -586,24 +596,38 @@ export async function POST(request: Request) {
     },
   });
 
-  return createUIMessageStreamResponse({
-    stream: toUIMessageStream({
-      stream: result.stream,
-      originalMessages: messages,
-      generateMessageId: createIdGenerator({ prefix: "msg", size: 20 }),
-      async onEnd({ messages: completedMessages, responseMessage, isAborted }) {
-        if (isAborted && persistence) {
-          await stopGeneration(persistence.context, persistence.generation.id);
-          return;
-        }
-        const usage = await result.usage;
-        await persistCompleted(completedMessages, responseMessage, {
+  const responseStream = createUIMessageStream({
+    originalMessages: messages,
+    generateId: createIdGenerator({ prefix: "msg", size: 20 }),
+    execute({ writer }) {
+      for (const source of knowledgeSources) writer.write(source);
+      writer.merge(
+        toUIMessageStream({
+          stream: result.stream,
+          onError: () => "模型暂时不可用，请稍后重试。",
+        }),
+      );
+    },
+    async onEnd({ messages: completedMessages, responseMessage, isAborted }) {
+      if (isAborted && persistence) {
+        await stopGeneration(persistence.context, persistence.generation.id);
+        return;
+      }
+      const usage = await result.usage;
+      await persistCompleted(
+        completedMessages,
+        responseMessage,
+        {
           inputTokens: usage.inputTokens ?? 0,
           outputTokens: usage.outputTokens ?? 0,
-        }, startedAt);
-      },
-      onError: () => "模型暂时不可用，请稍后重试。",
-    }),
+        },
+        startedAt,
+      );
+    },
+  });
+
+  return createUIMessageStreamResponse({
+    stream: responseStream,
     headers: {
       "x-ai2dot-mode": responseMode,
       ...(persistence

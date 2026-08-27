@@ -14,7 +14,13 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { BrandMark } from "@/components/brand-mark";
 import type {
   KnowledgeBaseSummary,
@@ -34,7 +40,9 @@ export function KnowledgeManager({
   initialKnowledgeBases: KnowledgeBaseSummary[];
 }) {
   const [knowledgeBases, setKnowledgeBases] = useState(initialKnowledgeBases);
-  const [selectedId, setSelectedId] = useState(initialKnowledgeBases[0]?.id);
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    initialKnowledgeBases[0]?.id,
+  );
   const [documents, setDocuments] = useState<KnowledgeDocumentSummary[]>([]);
   const [newBaseOpen, setNewBaseOpen] = useState(initialKnowledgeBases.length === 0);
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -45,7 +53,7 @@ export function KnowledgeManager({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedBase = knowledgeBases.find((base) => base.id === selectedId);
 
-  const refresh = async (nextSelectedId = selectedId) => {
+  const refresh = useCallback(async (nextSelectedId?: string) => {
     const response = await fetch("/api/knowledge-bases", { cache: "no-store" });
     if (!response.ok) throw new Error("知识库刷新失败。");
     const payload = (await response.json()) as { knowledgeBases: KnowledgeBaseSummary[] };
@@ -54,7 +62,19 @@ export function KnowledgeManager({
       ? nextSelectedId
       : payload.knowledgeBases[0]?.id;
     setSelectedId(resolvedId);
-  };
+  }, []);
+
+  const loadDocuments = useCallback(async (knowledgeBaseId: string) => {
+    const response = await fetch(`/api/knowledge-bases/${knowledgeBaseId}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("文档列表加载失败。");
+    const payload = (await response.json()) as {
+      documents: KnowledgeDocumentSummary[];
+    };
+    setDocuments(payload.documents);
+    return payload.documents;
+  }, []);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -62,7 +82,9 @@ export function KnowledgeManager({
     void fetch(`/api/knowledge-bases/${selectedId}`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error();
-        return (await response.json()) as { documents: KnowledgeDocumentSummary[] };
+        return (await response.json()) as {
+          documents: KnowledgeDocumentSummary[];
+        };
       })
       .then((payload) => {
         if (!cancelled) setDocuments(payload.documents);
@@ -74,6 +96,31 @@ export function KnowledgeManager({
       cancelled = true;
     };
   }, [selectedId]);
+
+  const hasProcessingDocuments = documents.some(
+    (document) => document.status === "processing",
+  );
+
+  useEffect(() => {
+    if (!selectedId || !hasProcessingDocuments) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void loadDocuments(selectedId)
+        .then((nextDocuments) => {
+          if (
+            !cancelled &&
+            nextDocuments.every((document) => document.status !== "processing")
+          ) {
+            void refresh(selectedId);
+          }
+        })
+        .catch(() => undefined);
+    }, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasProcessingDocuments, loadDocuments, refresh, selectedId]);
 
   const createBase = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -113,12 +160,10 @@ export function KnowledgeManager({
       });
       const payload = (await response.json()) as { message?: string };
       if (!response.ok) throw new Error(payload.message || "文档导入失败。");
-      const detail = await fetch(`/api/knowledge-bases/${selectedId}`, { cache: "no-store" });
-      const detailPayload = (await detail.json()) as { documents: KnowledgeDocumentSummary[] };
-      setDocuments(detailPayload.documents);
+      await loadDocuments(selectedId);
       await refresh(selectedId);
       setPasteOpen(false);
-      setNotice("文档已完成分块并可用于会话检索。");
+      setNotice("文档已提交，系统正在后台解析并建立索引。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "文档导入失败。");
     } finally {
@@ -209,7 +254,7 @@ export function KnowledgeManager({
           <p className="knowledge-intro">将稳定资料交给 Dot，在回答中获得可追溯的上下文。</p>
           <div className="knowledge-base-list">
             {knowledgeBases.map((base) => (
-              <button data-active={base.id === selectedId} key={base.id} onClick={() => { setSelectedId(base.id); setQuery(""); setResults([]); }}>
+              <button data-active={base.id === selectedId} key={base.id} onClick={() => { setSelectedId(base.id); setDocuments([]); setQuery(""); setResults([]); }}>
                 <BookOpen size={16} />
                 <span><strong>{base.name}</strong><small>{base.documentCount} 个文档 · {base.chunkCount} 个片段</small></span>
                 {base.id === selectedId && <Check size={14} />}
@@ -225,7 +270,7 @@ export function KnowledgeManager({
               <div className="knowledge-heading">
                 <div><p className="eyebrow">ACTIVE LIBRARY</p><h2>{selectedBase.name}</h2><p>{selectedBase.description || "为这个知识库导入资料，然后在对话设置中启用它。"}</p></div>
                 <div className="knowledge-heading-actions">
-                  <input ref={fileInputRef} hidden type="file" accept=".txt,.md,.markdown,.csv,.json,text/*" onChange={(event) => handleFile(event.target.files?.[0])} />
+                  <input ref={fileInputRef} hidden type="file" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*" onChange={(event) => handleFile(event.target.files?.[0])} />
                   <button className="knowledge-secondary" disabled={busy} onClick={() => setPasteOpen(true)}><FileText size={15} /> 粘贴文本</button>
                   <button className="admin-primary" disabled={busy} onClick={() => fileInputRef.current?.click()}>{busy ? <LoaderCircle className="is-spinning" size={15} /> : <Upload size={15} />} 上传文档</button>
                 </div>
@@ -234,7 +279,7 @@ export function KnowledgeManager({
               <div className="knowledge-stats">
                 <div><small>文档</small><strong>{selectedBase.documentCount}</strong></div>
                 <div><small>可检索片段</small><strong>{selectedBase.chunkCount}</strong></div>
-                <div><small>状态</small><strong><i /> 已就绪</strong></div>
+                <div><small>状态</small><strong><i data-busy={hasProcessingDocuments} /> {hasProcessingDocuments ? "正在索引" : documents.some((document) => document.status === "failed") ? "部分失败" : "已就绪"}</strong></div>
               </div>
 
               <form className="knowledge-search" onSubmit={search}>
@@ -256,12 +301,12 @@ export function KnowledgeManager({
                 </section>
               ) : (
                 <section className="knowledge-documents">
-                  <div className="knowledge-section-title"><span>文档</span><small>TXT / Markdown / CSV / JSON，单文件不超过 2MB</small></div>
+                  <div className="knowledge-section-title"><span>文档</span><small>PDF / DOCX / TXT / Markdown / CSV / JSON，单文件不超过 4MB</small></div>
                   {documents.length > 0 ? documents.map((document) => (
                     <div className="knowledge-document-row" key={document.id}>
                       <span className="knowledge-file-icon"><FileText size={17} /></span>
-                      <span><strong>{document.name}</strong><small>{formatBytes(document.byteSize)} · {document.characterCount.toLocaleString()} 字符 · {document.chunkCount} 个片段</small></span>
-                      <em data-status={document.status}>{document.status === "ready" ? "可检索" : document.status === "processing" ? "处理中" : "失败"}</em>
+                      <span><strong>{document.name}</strong><small>{formatBytes(document.byteSize)} · {document.characterCount.toLocaleString()} 字符 · {document.chunkCount} 个片段{document.errorMessage ? ` · ${document.errorMessage}` : ""}</small></span>
+                      <em data-status={document.status}>{document.status === "ready" ? "可检索" : document.status === "processing" ? "解析中" : "失败"}</em>
                       <button disabled={busy} onClick={() => void removeDocument(document)} aria-label={`删除 ${document.name}`}><Trash2 size={15} /></button>
                     </div>
                   )) : (

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { scoreKnowledgeText, splitKnowledgeText } from "./store";
+import {
+  rankKnowledgeResults,
+  scoreKnowledgeText,
+  splitKnowledgeText,
+} from "./store";
 
 describe("knowledge text processing", () => {
   it("splits long text into overlapping, bounded chunks", () => {
@@ -16,5 +20,26 @@ describe("knowledge text processing", () => {
 
   it("rejects empty documents", () => {
     expect(splitKnowledgeText(" \n ")).toEqual([]);
+  });
+
+  it("keeps retrieval diverse across documents", () => {
+    const common = {
+      mimeType: "text/markdown",
+      knowledgeBaseId: "base-1",
+      knowledgeBaseName: "产品资料",
+    };
+    const ranked = rankKnowledgeResults(
+      [
+        { ...common, chunkId: "1", documentId: "doc-a", documentName: "A", content: "Gemini 知识库完整说明" },
+        { ...common, chunkId: "2", documentId: "doc-a", documentName: "A", content: "Gemini 知识库配置说明" },
+        { ...common, chunkId: "3", documentId: "doc-a", documentName: "A", content: "Gemini 知识库接口说明" },
+        { ...common, chunkId: "4", documentId: "doc-b", documentName: "B", content: "Gemini 知识库使用方法" },
+      ],
+      "Gemini 知识库",
+      4,
+    );
+
+    expect(ranked.filter((result) => result.documentId === "doc-a")).toHaveLength(2);
+    expect(ranked.some((result) => result.documentId === "doc-b")).toBe(true);
   });
 });
