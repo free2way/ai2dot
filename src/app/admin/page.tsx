@@ -10,6 +10,7 @@ import {
   listProviderConnections,
   listProviderModels,
 } from "@/server/providers/store";
+import { listMcpSources } from "@/server/mcp/store";
 
 export default async function AdminPage() {
   const configuration = {
@@ -34,10 +35,11 @@ export default async function AdminPage() {
   const context = await getAdminWorkspaceContext();
   if (!context) redirect("/sign-in");
 
-  const [providers, models, operations] = await Promise.all([
+  const [providers, models, operations, mcpSources] = await Promise.all([
     listProviderConnections(context),
     listProviderModels(context),
     getWorkspaceOperations(context),
+    listMcpSources(context),
   ]);
 
   return (
@@ -47,6 +49,7 @@ export default async function AdminPage() {
       initialProviders={providers}
       initialModels={models}
       initialOperations={operations}
+      initialMcpSources={mcpSources}
     />
   );
 }

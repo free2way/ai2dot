@@ -46,6 +46,7 @@ export const providerType = pgEnum("provider_type", [
   "openai_compatible",
   "native",
 ]);
+export const mcpTransport = pgEnum("mcp_transport", ["http", "sse"]);
 export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
   "processing",
   "ready",
@@ -116,6 +117,32 @@ export const providerConnections = pgTable(
     ...timestamps,
   },
   (table) => [index("provider_connections_workspace_idx").on(table.workspaceId)],
+);
+
+export type McpToolSummary = {
+  name: string;
+  description?: string;
+};
+
+export const mcpSources = pgTable(
+  "mcp_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    transport: mcpTransport("transport").notNull().default("http"),
+    url: text("url").notNull(),
+    encryptedSecret: text("encrypted_secret"),
+    enabled: boolean("enabled").notNull().default(true),
+    tools: jsonb("tools").$type<McpToolSummary[]>().notNull().default([]),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    ...timestamps,
+  },
+  (table) => [index("mcp_sources_workspace_idx").on(table.workspaceId)],
 );
 
 export const models = pgTable(

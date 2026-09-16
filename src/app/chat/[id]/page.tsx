@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { currentUser } from "@clerk/nextjs/server";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
 import { FEATURED_MODELS } from "@/lib/models";
 import { isClerkConfigured } from "@/server/auth/config";
@@ -42,13 +43,14 @@ export default async function ConversationPage({
   if (!activeBranch) notFound();
   const chatMessages = await loadConversationMessages(context, id, activeBranch.id);
   if (!chatMessages) notFound();
-  const [workspaceModels, knowledgeBases, conversationList, liveAssistant] = await Promise.all([
+  const [workspaceModels, knowledgeBases, conversationList, liveAssistant, user] = await Promise.all([
     listEnabledChatModels(context),
     listKnowledgeBases(context),
     listConversations(context),
     conversation.assistantId
       ? getAssistant(context, conversation.assistantId)
       : Promise.resolve(null),
+    currentUser(),
   ]);
   const assistant = conversation.assistantSnapshot ?? liveAssistant;
   const assistantIdentity = assistant
@@ -83,6 +85,7 @@ export default async function ConversationPage({
       initialContextCompacted={activeBranch.hasContextSummary}
       initialMessages={initialMessages}
       initialConversations={conversationList}
+      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || null}
       initialModelId={assistant?.defaultModelKey ?? undefined}
       initialKnowledgeBaseIds={assistant?.knowledgeBaseIds ?? []}
       initialAssistant={assistant ? {

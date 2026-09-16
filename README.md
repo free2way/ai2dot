@@ -37,6 +37,18 @@ openssl rand -base64 32
 
 配置 `PROVIDER_SECRET_ENCRYPTION_KEY` 后即可添加连接并在线刷新模型目录。后台页面和 API 都会执行账户及工作区管理员权限检查，并显示最近 30 天用量、token、预估费用及供应商健康状态。
 
+## 外部 MCP 来源
+
+访问 `/admin#mcp-sources` 或在模型管理页向下滚动到“外部 MCP 来源”，即可添加远程 MCP 服务。当前支持 Streamable HTTP（推荐）和 SSE 两种传输方式，可选填写 Bearer Token；地址必须使用 HTTPS，并会阻止解析到内网的主机。
+
+保存后 AI2Dot 会测试连接并同步工具清单。启用的 MCP 来源会自动提供给云端聊天，模型最多连续执行 5 个工具步骤；单个来源不可用时不会阻断普通模型回答。MCP 凭据与模型供应商密钥使用同一套 AES-256-GCM 加密策略。
+
+新增 MCP 数据表后，在本地或部署环境执行一次迁移：
+
+```bash
+npm run db:migrate
+```
+
 云端聊天默认限制为每位用户每分钟 30 次请求，使用 Neon 原子计数保证多个 Vercel 实例之间口径一致。可以通过 `AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE` 调整为 1–300。
 
 ## 知识库
@@ -49,7 +61,7 @@ openssl rand -base64 32
 
 - AI：工作区自带的 OpenAI-compatible 供应商；Vercel AI Gateway 为可选能力
 - Auth：Clerk（两项 Clerk key 同时配置后启用）
-- Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型、知识库）
+- Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型、知识库、MCP 来源）
 - Rate limit：Neon PostgreSQL 分钟窗口原子计数
 - Documents：文档提取后按片段存入 Neon；当前不保留原始上传文件
 

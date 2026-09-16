@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 import { BrandMark } from "@/components/brand-mark";
+import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import type {
   KnowledgeBaseSummary,
   KnowledgeDocumentSummary,
@@ -39,6 +40,7 @@ export function KnowledgeManager({
 }: {
   initialKnowledgeBases: KnowledgeBaseSummary[];
 }) {
+  const { t } = useLanguage();
   const [knowledgeBases, setKnowledgeBases] = useState(initialKnowledgeBases);
   const [selectedId, setSelectedId] = useState<string | undefined>(
     initialKnowledgeBases[0]?.id,
@@ -243,81 +245,81 @@ export function KnowledgeManager({
     <main className="knowledge-shell">
       <header className="admin-topbar">
         <BrandMark />
-        <Link href="/"><ArrowLeft size={14} /> 返回对话</Link>
+        <div className="admin-topbar-actions"><LanguageSwitcher /><Link href="/"><ArrowLeft size={14} /> {t("返回对话")}</Link></div>
       </header>
       <div className="knowledge-layout">
         <aside className="knowledge-navigation">
           <div className="knowledge-navigation-head">
-            <div><p className="eyebrow">KNOWLEDGE</p><h1>知识库</h1></div>
-            <button onClick={() => setNewBaseOpen(true)} aria-label="新建知识库"><Plus size={17} /></button>
+            <div><p className="eyebrow">KNOWLEDGE</p><h1>{t("知识库")}</h1></div>
+            <button onClick={() => setNewBaseOpen(true)} aria-label={t("新建知识库")}><Plus size={17} /></button>
           </div>
-          <p className="knowledge-intro">将稳定资料交给 Dot，在回答中获得可追溯的上下文。</p>
+          <p className="knowledge-intro">{t("将稳定资料交给 Dot，在回答中获得可追溯的上下文。")}</p>
           <div className="knowledge-base-list">
             {knowledgeBases.map((base) => (
               <button data-active={base.id === selectedId} key={base.id} onClick={() => { setSelectedId(base.id); setDocuments([]); setQuery(""); setResults([]); }}>
                 <BookOpen size={16} />
-                <span><strong>{base.name}</strong><small>{base.documentCount} 个文档 · {base.chunkCount} 个片段</small></span>
+                <span><strong>{base.name}</strong><small>{base.documentCount} {t("文档")} · {base.chunkCount} {t("片段")}</small></span>
                 {base.id === selectedId && <Check size={14} />}
               </button>
             ))}
           </div>
-          <button className="knowledge-new-base" onClick={() => setNewBaseOpen(true)}><Plus size={15} /> 新建知识库</button>
+          <button className="knowledge-new-base" onClick={() => setNewBaseOpen(true)}><Plus size={15} /> {t("新建知识库")}</button>
         </aside>
 
         <section className="knowledge-workspace">
           {selectedBase ? (
             <>
               <div className="knowledge-heading">
-                <div><p className="eyebrow">ACTIVE LIBRARY</p><h2>{selectedBase.name}</h2><p>{selectedBase.description || "为这个知识库导入资料，然后在对话设置中启用它。"}</p></div>
+                <div><p className="eyebrow">ACTIVE LIBRARY</p><h2>{selectedBase.name}</h2><p>{selectedBase.description || t("为这个知识库导入资料，然后在对话设置中启用它。")}</p></div>
                 <div className="knowledge-heading-actions">
                   <input ref={fileInputRef} hidden type="file" accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*" onChange={(event) => handleFile(event.target.files?.[0])} />
-                  <button className="knowledge-secondary" disabled={busy} onClick={() => setPasteOpen(true)}><FileText size={15} /> 粘贴文本</button>
-                  <button className="admin-primary" disabled={busy} onClick={() => fileInputRef.current?.click()}>{busy ? <LoaderCircle className="is-spinning" size={15} /> : <Upload size={15} />} 上传文档</button>
+                  <button className="knowledge-secondary" disabled={busy} onClick={() => setPasteOpen(true)}><FileText size={15} /> {t("粘贴文本")}</button>
+                  <button className="admin-primary" disabled={busy} onClick={() => fileInputRef.current?.click()}>{busy ? <LoaderCircle className="is-spinning" size={15} /> : <Upload size={15} />} {t("上传文档")}</button>
                 </div>
               </div>
 
               <div className="knowledge-stats">
-                <div><small>文档</small><strong>{selectedBase.documentCount}</strong></div>
-                <div><small>可检索片段</small><strong>{selectedBase.chunkCount}</strong></div>
-                <div><small>状态</small><strong><i data-busy={hasProcessingDocuments} /> {hasProcessingDocuments ? "正在索引" : documents.some((document) => document.status === "failed") ? "部分失败" : "已就绪"}</strong></div>
+                <div><small>{t("文档")}</small><strong>{selectedBase.documentCount}</strong></div>
+                <div><small>{t("可检索片段")}</small><strong>{selectedBase.chunkCount}</strong></div>
+                <div><small>{t("状态")}</small><strong><i data-busy={hasProcessingDocuments} /> {hasProcessingDocuments ? t("正在索引") : documents.some((document) => document.status === "failed") ? t("部分失败") : t("已就绪")}</strong></div>
               </div>
 
               <form className="knowledge-search" onSubmit={search}>
                 <Search size={16} />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="测试知识检索，例如：产品的部署方式" />
                 {query && <button type="button" onClick={() => { setQuery(""); setResults([]); }} aria-label="清除检索"><X size={14} /></button>}
-                <button type="submit" disabled={busy || !query.trim()}>检索</button>
+                <button type="submit" disabled={busy || !query.trim()}>{t("检索")}</button>
               </form>
 
               {results.length > 0 ? (
                 <section className="knowledge-results">
-                  <div className="knowledge-section-title"><span>检索结果</span><small>{results.length} 个相关片段</small></div>
+                  <div className="knowledge-section-title"><span>{t("检索结果")}</span><small>{results.length} {t("相关片段")}</small></div>
                   {results.map((result) => (
                     <article key={result.chunkId}>
-                      <div><FileSearch size={15} /><strong>{result.documentName}</strong><small>相关度 {Math.round(result.score * 100)}%</small></div>
+                      <div><FileSearch size={15} /><strong>{result.documentName}</strong><small>{t("相关度")} {Math.round(result.score * 100)}%</small></div>
                       <p>{result.content}</p>
                     </article>
                   ))}
                 </section>
               ) : (
                 <section className="knowledge-documents">
-                  <div className="knowledge-section-title"><span>文档</span><small>PDF / DOCX / TXT / Markdown / CSV / JSON，单文件不超过 4MB</small></div>
+                <div className="knowledge-section-title"><span>{t("文档")}</span><small>PDF / DOCX / TXT / Markdown / CSV / JSON · {t("单文件不超过 4MB")}</small></div>
                   {documents.length > 0 ? documents.map((document) => (
                     <div className="knowledge-document-row" key={document.id}>
                       <span className="knowledge-file-icon"><FileText size={17} /></span>
                       <span><strong>{document.name}</strong><small>{formatBytes(document.byteSize)} · {document.characterCount.toLocaleString()} 字符 · {document.chunkCount} 个片段{document.errorMessage ? ` · ${document.errorMessage}` : ""}</small></span>
-                      <em data-status={document.status}>{document.status === "ready" ? "可检索" : document.status === "processing" ? "解析中" : "失败"}</em>
+                      <em data-status={document.status}>{document.status === "ready" ? t("可检索") : document.status === "processing" ? t("解析中") : t("失败")}</em>
                       <button disabled={busy} onClick={() => void removeDocument(document)} aria-label={`删除 ${document.name}`}><Trash2 size={15} /></button>
                     </div>
                   )) : (
-                    <div className="knowledge-empty"><BookOpen size={24} /><strong>还没有文档</strong><p>上传文件或粘贴文本，系统会自动切分为适合模型检索的片段。</p></div>
+                    <div className="knowledge-empty"><BookOpen size={24} /><strong>{t("还没有文档")}</strong><p>{t("上传文件或粘贴文本，系统会自动切分为适合模型检索的片段。")}</p></div>
                   )}
                 </section>
               )}
-              <button className="knowledge-delete-base" disabled={busy} onClick={() => void removeBase()}><Trash2 size={14} /> 删除当前知识库</button>
+              <button className="knowledge-delete-base" disabled={busy} onClick={() => void removeBase()}><Trash2 size={14} /> {t("删除当前知识库")}</button>
             </>
           ) : (
-            <div className="knowledge-empty is-page"><BookOpen size={28} /><strong>创建第一个知识库</strong><p>按项目、产品或主题组织资料，并在任意对话中按需启用。</p><button className="admin-primary" onClick={() => setNewBaseOpen(true)}><Plus size={15} /> 新建知识库</button></div>
+            <div className="knowledge-empty is-page"><BookOpen size={28} /><strong>{t("创建第一个知识库")}</strong><p>{t("按项目、产品或主题组织资料，并在任意对话中按需启用。")}</p><button className="admin-primary" onClick={() => setNewBaseOpen(true)}><Plus size={15} /> {t("新建知识库")}</button></div>
           )}
           {notice && <div className="knowledge-notice"><span>{notice}</span><button onClick={() => setNotice(undefined)}><X size={14} /></button></div>}
         </section>
@@ -327,10 +329,10 @@ export function KnowledgeManager({
         <div className="knowledge-modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target && knowledgeBases.length > 0) setNewBaseOpen(false); }}>
           <form className="knowledge-modal" onSubmit={createBase}>
             <div><span><BookOpen size={18} /></span><button type="button" onClick={() => setNewBaseOpen(false)} disabled={knowledgeBases.length === 0}><X size={17} /></button></div>
-            <h2>新建知识库</h2><p>使用清晰的主题名称，方便在对话中快速选择。</p>
-            <label><span>名称</span><input name="name" maxLength={80} required autoFocus placeholder="例如：AI2Dot 产品资料" /></label>
-            <label><span>说明</span><textarea name="description" maxLength={240} rows={3} placeholder="这个知识库包含哪些资料？" /></label>
-            <button className="admin-primary" disabled={busy} type="submit">{busy ? "正在创建…" : "创建知识库"}</button>
+            <h2>{t("新建知识库")}</h2><p>{t("使用清晰的主题名称，方便在对话中快速选择。")}</p>
+            <label><span>{t("名称")}</span><input name="name" maxLength={80} required autoFocus placeholder={t("例如：AI2Dot 产品资料")} /></label>
+            <label><span>{t("说明")}</span><textarea name="description" maxLength={240} rows={3} placeholder={t("这个知识库包含哪些资料？")} /></label>
+            <button className="admin-primary" disabled={busy} type="submit">{busy ? t("正在创建…") : t("创建知识库")}</button>
           </form>
         </div>
       )}
@@ -339,10 +341,10 @@ export function KnowledgeManager({
         <div className="knowledge-modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setPasteOpen(false); }}>
           <form className="knowledge-modal is-wide" onSubmit={pasteDocument}>
             <div><span><FileText size={18} /></span><button type="button" onClick={() => setPasteOpen(false)}><X size={17} /></button></div>
-            <h2>粘贴文本</h2><p>适合会议纪要、产品说明、FAQ 或暂时没有文件的资料。</p>
-            <label><span>文档名称</span><input name="name" maxLength={160} required placeholder="例如：部署操作手册" /></label>
-            <label><span>正文</span><textarea name="content" maxLength={500000} rows={10} required placeholder="在这里粘贴需要检索的内容…" /></label>
-            <button className="admin-primary" disabled={busy} type="submit">{busy ? "正在处理…" : "保存并建立索引"}</button>
+            <h2>{t("粘贴文本")}</h2><p>{t("适合会议纪要、产品说明、FAQ 或暂时没有文件的资料。")}</p>
+            <label><span>{t("文档名称")}</span><input name="name" maxLength={160} required placeholder={t("例如：部署操作手册")} /></label>
+            <label><span>{t("正文")}</span><textarea name="content" maxLength={500000} rows={10} required placeholder={t("在这里粘贴需要检索的内容…")} /></label>
+            <button className="admin-primary" disabled={busy} type="submit">{busy ? t("正在处理…") : t("保存并建立索引")}</button>
           </form>
         </div>
       )}

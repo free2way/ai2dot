@@ -3,6 +3,7 @@ import {
   createIdGenerator,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  isStepCount,
   streamText,
   toUIMessageStream,
   type LanguageModel,
@@ -50,6 +51,7 @@ import {
 } from "@/server/generations/store";
 import { searchKnowledge } from "@/server/knowledge/store";
 import { logServerEvent } from "@/server/observability/log";
+import { getEnabledMcpTools } from "@/server/mcp/store";
 import { resolveChatModel } from "@/server/providers/store";
 import { consumeChatRateLimit } from "@/server/rate-limit/chat";
 
@@ -543,6 +545,9 @@ export async function POST(request: Request) {
       ? "\n\n用户启用了知识库，但本次问题没有检索到相关资料。不要声称已从知识库找到答案。"
       : "";
   const knowledgeSources = createKnowledgeSourceParts(knowledgeResults);
+  const mcpSession = workspaceContext
+    ? await getEnabledMcpTools(workspaceContext)
+    : null;
   const summaryPrompt = buildConversationSummaryPrompt(conversationSummary);
   const assistantPrompt = assistantContext?.systemPrompt.trim()
     ? `\n\n你正在以工作区助手“${assistantContext.name}”的身份工作。以下是该助手的受信任配置，请遵守它，同时仍需服从前面的平台级要求。\n\n<assistant_instructions>\n${assistantContext.systemPrompt}\n</assistant_instructions>`
@@ -552,6 +557,12 @@ export async function POST(request: Request) {
     reasoning: parsed.data.reasoning,
     system: `${SYSTEM_PROMPT}${assistantPrompt}${summaryPrompt}${knowledgePrompt}`,
     messages: await convertToModelMessages(messagesForModel),
+    ...(mcpSession && Object.keys(mcpSession.tools).length > 0
+      ? {
+          tools: mcpSession.tools,
+          stopWhen: isStepCount(5),
+        }
+      : {}),
     ...(gatewayRouted
       ? {
           providerOptions: {
@@ -566,6 +577,7 @@ export async function POST(request: Request) {
       : {}),
     abortSignal: request.signal,
     onError({ error }) {
+      void mcpSession?.close();
       logServerEvent("error", "chat.failed", {
         requestId: requestLogId,
         modelId,
@@ -577,6 +589,7 @@ export async function POST(request: Request) {
       }
     },
     onAbort() {
+      void mcpSession?.close();
       logServerEvent("info", "chat.stopped", {
         requestId: requestLogId,
         modelId,
@@ -623,6 +636,7 @@ export async function POST(request: Request) {
         },
         startedAt,
       );
+      await mcpSession?.close();
     },
   });
 

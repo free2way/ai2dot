@@ -2,11 +2,13 @@ import { SignUp } from "@clerk/nextjs";
 import { ArrowLeft, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { isClerkConfigured } from "@/server/auth/config";
+import { LanguageSwitcher } from "@/lib/i18n";
 
 export default function SignUpPage() {
   if (isClerkConfigured()) {
     return (
       <main className="auth-shell">
+        <LanguageSwitcher />
         <Link className="auth-back" href="/">
           <ArrowLeft size={16} /> 返回工作台
         </Link>
@@ -17,6 +19,7 @@ export default function SignUpPage() {
 
   return (
     <main className="auth-shell">
+      <LanguageSwitcher />
       <section className="auth-setup">
         <div className="auth-icon"><UserPlus size={22} /></div>
         <p className="eyebrow">ACCOUNT SETUP</p>

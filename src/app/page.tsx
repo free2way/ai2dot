@@ -1,4 +1,5 @@
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
+import { currentUser } from "@clerk/nextjs/server";
 import { FEATURED_MODELS } from "@/lib/models";
 import { isClerkConfigured } from "@/server/auth/config";
 import { getRequestIdentity } from "@/server/auth/session";
@@ -7,18 +8,22 @@ import { listConversations } from "@/server/chat/store";
 import { getWorkspaceContext, isPersistenceConfigured } from "@/server/db/workspace";
 import { listEnabledChatModels } from "@/server/providers/store";
 import { listKnowledgeBases } from "@/server/knowledge/store";
+import { listMcpSources } from "@/server/mcp/store";
 
 export default async function Home() {
   const canPersist = isClerkConfigured() && isPersistenceConfigured();
   const context = canPersist ? await getWorkspaceContext() : null;
-  const identity = isClerkConfigured() ? await getRequestIdentity() : null;
-  const [conversationList, workspaceModels, knowledgeBases] = context
+  const [identity, user] = isClerkConfigured()
+    ? await Promise.all([getRequestIdentity(), currentUser()])
+    : [null, null];
+  const [conversationList, workspaceModels, knowledgeBases, mcpSources] = context
     ? await Promise.all([
         listConversations(context),
         listEnabledChatModels(context),
         listKnowledgeBases(context),
+        listMcpSources(context),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
 
   return (
     <ChatWorkspace
@@ -31,7 +36,15 @@ export default async function Home() {
       }
       persistenceEnabled={Boolean(context)}
       initialConversations={conversationList}
+      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || null}
       initialKnowledgeBases={knowledgeBases}
+      initialMcpSources={mcpSources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        transport: source.transport,
+        enabled: source.enabled,
+        toolCount: source.tools.length,
+      }))}
     />
   );
 }
