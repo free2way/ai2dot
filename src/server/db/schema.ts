@@ -47,6 +47,11 @@ export const providerType = pgEnum("provider_type", [
   "native",
 ]);
 export const mcpTransport = pgEnum("mcp_transport", ["http", "sse"]);
+export const skillSourceType = pgEnum("skill_source_type", [
+  "manual",
+  "github",
+  "url",
+]);
 export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
   "processing",
   "ready",
@@ -143,6 +148,33 @@ export const mcpSources = pgTable(
     ...timestamps,
   },
   (table) => [index("mcp_sources_workspace_idx").on(table.workspaceId)],
+);
+
+export const skills = pgTable(
+  "skills",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description").notNull(),
+    version: text("version").notNull().default("1.0.0"),
+    sourceType: skillSourceType("source_type").notNull().default("manual"),
+    sourceUrl: text("source_url"),
+    instructions: text("instructions").notNull(),
+    keywords: jsonb("keywords").$type<string[]>().notNull().default([]),
+    requiredMcp: jsonb("required_mcp").$type<string[]>().notNull().default([]),
+    contentHash: text("content_hash").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    autoLoad: boolean("auto_load").notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("skills_workspace_slug_idx").on(table.workspaceId, table.slug),
+    index("skills_workspace_enabled_idx").on(table.workspaceId, table.enabled),
+  ],
 );
 
 export const models = pgTable(

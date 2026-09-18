@@ -17,6 +17,8 @@ import {
 } from "@/server/db/workspace";
 import { listEnabledChatModels } from "@/server/providers/store";
 import { listKnowledgeBases } from "@/server/knowledge/store";
+import { listMcpSources } from "@/server/mcp/store";
+import { listSkills } from "@/server/skills/store";
 
 export default async function ConversationPage({
   params,
@@ -43,7 +45,7 @@ export default async function ConversationPage({
   if (!activeBranch) notFound();
   const chatMessages = await loadConversationMessages(context, id, activeBranch.id);
   if (!chatMessages) notFound();
-  const [workspaceModels, knowledgeBases, conversationList, liveAssistant, user] = await Promise.all([
+  const [workspaceModels, knowledgeBases, conversationList, liveAssistant, user, mcpSources, skills] = await Promise.all([
     listEnabledChatModels(context),
     listKnowledgeBases(context),
     listConversations(context),
@@ -51,6 +53,8 @@ export default async function ConversationPage({
       ? getAssistant(context, conversation.assistantId)
       : Promise.resolve(null),
     currentUser(),
+    listMcpSources(context),
+    listSkills(context),
   ]);
   const assistant = conversation.assistantSnapshot ?? liveAssistant;
   const assistantIdentity = assistant
@@ -93,6 +97,20 @@ export default async function ConversationPage({
         description: assistant.description,
       } : undefined}
       initialKnowledgeBases={knowledgeBases}
+      initialMcpSources={mcpSources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        transport: source.transport,
+        enabled: source.enabled,
+        toolCount: source.tools.length,
+      }))}
+      initialSkills={skills.map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        enabled: skill.enabled,
+        autoLoad: skill.autoLoad,
+      }))}
     />
   );
 }

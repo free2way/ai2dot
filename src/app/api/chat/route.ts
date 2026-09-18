@@ -54,6 +54,7 @@ import { logServerEvent } from "@/server/observability/log";
 import { getEnabledMcpTools } from "@/server/mcp/store";
 import { resolveChatModel } from "@/server/providers/store";
 import { consumeChatRateLimit } from "@/server/rate-limit/chat";
+import { getEnabledSkillContext } from "@/server/skills/store";
 
 export const maxDuration = 60;
 
@@ -548,6 +549,9 @@ export async function POST(request: Request) {
   const mcpSession = workspaceContext
     ? await getEnabledMcpTools(workspaceContext)
     : null;
+  const skillContext = workspaceContext
+    ? await getEnabledSkillContext(workspaceContext, getLatestUserText(messages))
+    : { selected: [], prompt: "" };
   const summaryPrompt = buildConversationSummaryPrompt(conversationSummary);
   const assistantPrompt = assistantContext?.systemPrompt.trim()
     ? `\n\n你正在以工作区助手“${assistantContext.name}”的身份工作。以下是该助手的受信任配置，请遵守它，同时仍需服从前面的平台级要求。\n\n<assistant_instructions>\n${assistantContext.systemPrompt}\n</assistant_instructions>`
@@ -555,7 +559,7 @@ export async function POST(request: Request) {
   const result = streamText({
     model: languageModel,
     reasoning: parsed.data.reasoning,
-    system: `${SYSTEM_PROMPT}${assistantPrompt}${summaryPrompt}${knowledgePrompt}`,
+    system: `${SYSTEM_PROMPT}${assistantPrompt}${skillContext.prompt}${summaryPrompt}${knowledgePrompt}`,
     messages: await convertToModelMessages(messagesForModel),
     ...(mcpSession && Object.keys(mcpSession.tools).length > 0
       ? {

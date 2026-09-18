@@ -9,6 +9,7 @@ import { getWorkspaceContext, isPersistenceConfigured } from "@/server/db/worksp
 import { listEnabledChatModels } from "@/server/providers/store";
 import { listKnowledgeBases } from "@/server/knowledge/store";
 import { listMcpSources } from "@/server/mcp/store";
+import { listSkills } from "@/server/skills/store";
 
 export default async function Home() {
   const canPersist = isClerkConfigured() && isPersistenceConfigured();
@@ -16,14 +17,15 @@ export default async function Home() {
   const [identity, user] = isClerkConfigured()
     ? await Promise.all([getRequestIdentity(), currentUser()])
     : [null, null];
-  const [conversationList, workspaceModels, knowledgeBases, mcpSources] = context
+  const [conversationList, workspaceModels, knowledgeBases, mcpSources, skills] = context
     ? await Promise.all([
         listConversations(context),
         listEnabledChatModels(context),
         listKnowledgeBases(context),
         listMcpSources(context),
+        listSkills(context),
       ])
-    : [[], [], [], []];
+    : [[], [], [], [], []];
 
   return (
     <ChatWorkspace
@@ -44,6 +46,13 @@ export default async function Home() {
         transport: source.transport,
         enabled: source.enabled,
         toolCount: source.tools.length,
+      }))}
+      initialSkills={skills.map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        enabled: skill.enabled,
+        autoLoad: skill.autoLoad,
       }))}
     />
   );

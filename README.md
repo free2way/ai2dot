@@ -1,6 +1,6 @@
 # ai2dot
 
-一个面向个人与小团队的云端、多租户 AI 聚合工作台。当前版本具备响应式 Chat UI、AI SDK 流式协议、多模型切换、Clerk 登录、Neon 云端会话、供应商后台、Generation 可靠性记录、非覆盖式对话分支、知识库检索以及无密钥演示模式。
+一个面向个人与小团队的云端、多租户 AI 聚合工作台。当前版本具备响应式 Chat UI、AI SDK 流式协议、多模型切换、Clerk 登录、Neon 云端会话、供应商后台、Generation 可靠性记录、非覆盖式对话分支、知识库检索、指令型 Skill 以及无密钥演示模式。
 
 ## 本地启动
 
@@ -49,6 +49,12 @@ openssl rand -base64 32
 npm run db:migrate
 ```
 
+## 外部 Skill
+
+访问 `/admin#skills` 管理工作区 Skill。第一阶段支持粘贴或从 `raw.githubusercontent.com` / `gist.githubusercontent.com` 导入 `SKILL.md` 指令包，解析 `name`、`description`、`version`、`keywords` 和 `required_mcp` 等简单 frontmatter；启用后，聊天会按当前问题相关性最多加载 3 个 Skill。Skill 只提供受限的工作流程上下文，不会执行其中的脚本、命令或隐藏指令，也不会赋予新的 MCP 权限。
+
+Skill 与 MCP 互补：Skill 描述“如何完成工作”，MCP 提供“可以访问的工具和数据”。当前 Skill 内容按工作区隔离保存，支持启用/停用、自动匹配、版本和来源记录，并保存 SHA-256 内容指纹。后续再增加 MCP 工具白名单、用户确认和沙箱脚本执行。
+
 云端聊天默认限制为每位用户每分钟 30 次请求，使用 Neon 原子计数保证多个 Vercel 实例之间口径一致。可以通过 `AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE` 调整为 1–300。
 
 ## 知识库
@@ -61,7 +67,7 @@ npm run db:migrate
 
 - AI：工作区自带的 OpenAI-compatible 供应商；Vercel AI Gateway 为可选能力
 - Auth：Clerk（两项 Clerk key 同时配置后启用）
-- Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型、知识库、MCP 来源）
+- Database：Neon PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型、知识库、MCP 来源、Skill）
 - Rate limit：Neon PostgreSQL 分钟窗口原子计数
 - Documents：文档提取后按片段存入 Neon；当前不保留原始上传文件
 

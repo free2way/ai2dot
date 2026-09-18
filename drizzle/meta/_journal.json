@@ -71,6 +71,13 @@
       "when": 1789464412205,
       "tag": "0009_chilly_golden_guardian",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789695419481,
+      "tag": "0010_happy_venus",
+      "breakpoints": true
     }
   ]
 }

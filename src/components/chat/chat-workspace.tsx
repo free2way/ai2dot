@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowUp,
   BookPlus,
+  BookOpen,
   Bot,
   BrainCircuit,
   Check,
@@ -113,6 +114,13 @@ type ChatWorkspaceProps = {
     enabled: boolean;
     toolCount: number;
   }[];
+  initialSkills?: {
+    id: string;
+    name: string;
+    description: string;
+    enabled: boolean;
+    autoLoad: boolean;
+  }[];
 };
 
 function formatConversationTime(value: string) {
@@ -161,6 +169,7 @@ export function ChatWorkspace({
   initialUserName,
   initialKnowledgeBases = [],
   initialMcpSources = [],
+  initialSkills = [],
 }: ChatWorkspaceProps) {
   const { language, t } = useLanguage();
   const router = useRouter();
@@ -979,6 +988,21 @@ export function ChatWorkspace({
               <p className="branch-help">{t("还没有启用的外部 MCP。可在模型管理中添加。")}</p>
             )}
             <Link className="knowledge-manage-link" href="/admin#mcp-sources">{t("管理 MCP 来源")}</Link>
+          </section>
+        )}
+        {persistenceEnabled && (
+          <section className="inspector-section">
+            <div className="section-title"><span>外部 Skill</span><small>{initialSkills.filter((skill) => skill.enabled).length}</small></div>
+            {initialSkills.filter((skill) => skill.enabled).length > 0 ? (
+              <div className="skill-inspector-list">
+                {initialSkills.filter((skill) => skill.enabled).map((skill) => (
+                  <div key={skill.id}><BookOpen size={14} /><span><strong>{skill.name}</strong><small>{skill.autoLoad ? "自动按问题匹配" : "已启用"}</small></span></div>
+                ))}
+              </div>
+            ) : (
+              <p className="branch-help">还没有启用的外部 Skill，可在模型管理中添加。</p>
+            )}
+            <Link className="knowledge-manage-link" href="/admin#skills">管理外部 Skill</Link>
           </section>
         )}
         {persistenceEnabled && (

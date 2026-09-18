@@ -29,6 +29,10 @@ import {
   type McpSourceSummary,
 } from "@/components/admin/mcp-source-manager";
 import {
+  SkillManager,
+  type SkillSummary,
+} from "@/components/admin/skill-manager";
+import {
   EMPTY_OPERATIONS_OVERVIEW,
   type ProviderHealthStatus,
   type WorkspaceOperationsOverview,
@@ -67,6 +71,7 @@ type Props = {
   initialModels?: ProviderModelSummary[];
   initialOperations?: WorkspaceOperationsOverview;
   initialMcpSources?: McpSourceSummary[];
+  initialSkills?: SkillSummary[];
 };
 
 type ProviderTemplate = {
@@ -159,6 +164,7 @@ export function ProviderManager({
   initialModels = [],
   initialOperations = EMPTY_OPERATIONS_OVERVIEW,
   initialMcpSources = [],
+  initialSkills = [],
 }: Props) {
   const { t } = useLanguage();
   const [providers, setProviders] = useState(initialProviders);
@@ -470,6 +476,11 @@ export function ProviderManager({
         <McpSourceManager
           infrastructureReady={infrastructureReady}
           initialSources={initialMcpSources}
+        />
+
+        <SkillManager
+          infrastructureReady={infrastructureReady}
+          initialSkills={initialSkills}
         />
 
         {notice && <div className="admin-notice" role="status">{notice}<button onClick={() => setNotice(undefined)} aria-label="关闭提示"><X size={14} /></button></div>}
