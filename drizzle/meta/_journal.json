@@ -78,6 +78,13 @@
       "when": 1789695419481,
       "tag": "0010_happy_venus",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789993511768,
+      "tag": "0011_military_william_stryker",
+      "breakpoints": true
     }
   ]
 }

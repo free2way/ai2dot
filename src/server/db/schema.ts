@@ -51,6 +51,7 @@ export const skillSourceType = pgEnum("skill_source_type", [
   "manual",
   "github",
   "url",
+  "builtin",
 ]);
 export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
   "processing",

@@ -10,6 +10,7 @@ export type SkillSummary = {
   description: string;
   version: string;
   sourceUrl: string | null;
+  builtIn: boolean;
   enabled: boolean;
   autoLoad: boolean;
   keywords: string[];

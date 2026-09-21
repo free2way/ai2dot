@@ -2117,6 +2117,52 @@ textarea:focus-visible {
   padding: clamp(28px, 4vw, 52px);
 }
 
+.assistant-empty-state {
+  display: grid;
+  min-height: 520px;
+  text-align: center;
+  place-items: center;
+}
+
+.assistant-empty-state > div {
+  display: grid;
+  max-width: 420px;
+  justify-items: center;
+}
+
+.assistant-empty-icon {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 18px;
+  color: var(--acid-ink);
+  background: var(--acid);
+  border-radius: 8px;
+  place-items: center;
+}
+
+.assistant-empty-state h2 {
+  margin: 8px 0;
+  font-size: 28px;
+  font-weight: 620;
+}
+
+.assistant-empty-state > div > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.assistant-empty-state .admin-primary {
+  margin-top: 22px;
+}
+
+.assistant-empty-state .assistant-empty-feedback {
+  margin-top: 12px;
+  color: #557522;
+}
+
 .assistant-editor-head {
   justify-content: space-between;
   gap: 24px;
@@ -3416,6 +3462,153 @@ textarea:focus-visible {
   text-align: right;
 }
 
+.mcp-preset-section {
+  margin: 20px 0;
+}
+
+.mcp-preset-heading,
+.mcp-preset-heading > div,
+.mcp-preset-top,
+.mcp-preset-actions {
+  display: flex;
+  align-items: center;
+}
+
+.mcp-preset-heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mcp-preset-heading > div {
+  gap: 7px;
+}
+
+.mcp-preset-heading strong {
+  font-size: 11px;
+}
+
+.mcp-preset-heading small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.mcp-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.mcp-preset-card {
+  display: grid;
+  min-width: 0;
+  min-height: 172px;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 10px;
+  padding: 13px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.mcp-preset-card[data-available="false"] {
+  background: var(--paper-2);
+}
+
+.mcp-preset-top {
+  justify-content: space-between;
+}
+
+.mcp-preset-top > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  color: var(--ink);
+  background: var(--paper-2);
+  border-radius: 7px;
+  place-items: center;
+}
+
+.mcp-preset-card[data-available="false"] .mcp-preset-top > span {
+  background: var(--white);
+}
+
+.mcp-preset-top em {
+  padding: 3px 5px;
+  color: #557522;
+  font-size: 8px;
+  font-style: normal;
+  background: rgb(183 243 74 / 18%);
+  border-radius: 4px;
+}
+
+.mcp-preset-card[data-available="false"] .mcp-preset-top em {
+  color: var(--muted);
+  background: #e8e9e2;
+}
+
+.mcp-preset-card > div:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-preset-card > div:nth-child(2) strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-preset-card > div:nth-child(2) small {
+  flex: 0 0 auto;
+  color: #557522;
+  font-size: 8px;
+}
+
+.mcp-preset-card > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.mcp-preset-actions {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mcp-preset-actions a {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-radius: 6px;
+  place-items: center;
+}
+
+.mcp-preset-actions a:hover {
+  color: var(--ink);
+}
+
+.mcp-preset-actions button {
+  min-width: 68px;
+  height: 28px;
+  padding: 0 9px;
+  color: var(--ink);
+  font-size: 9px;
+  cursor: pointer;
+  background: var(--acid);
+  border-radius: 6px;
+}
+
+.mcp-preset-actions button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  background: #e2e3dc;
+}
+
 .mcp-source-list {
   overflow: hidden;
   background: var(--white);
@@ -4185,6 +4378,10 @@ textarea:focus-visible {
   .mobile-scrim[data-visible="true"] {
     display: block;
   }
+
+  .mcp-preset-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (min-width: 1101px) {
@@ -4384,6 +4581,10 @@ textarea:focus-visible {
     padding: 28px 16px 48px;
   }
 
+  .assistant-empty-state {
+    min-height: 460px;
+  }
+
   .assistant-editor-head {
     align-items: flex-start;
     flex-direction: column;
@@ -4551,6 +4752,20 @@ textarea:focus-visible {
   .mcp-heading-actions small {
     max-width: none;
     text-align: left;
+  }
+
+  .mcp-preset-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .mcp-preset-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mcp-preset-card {
+    min-height: 160px;
   }
 
   .mcp-source-row {

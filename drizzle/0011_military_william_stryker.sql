@@ -1,0 +1,1 @@
+ALTER TYPE "public"."skill_source_type" ADD VALUE 'builtin';

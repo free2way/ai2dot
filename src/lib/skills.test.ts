@@ -5,6 +5,7 @@ import {
   parseSkillMarkdown,
   selectRelevantSkills,
 } from "@/lib/skills";
+import { BUILT_IN_SKILL_PRESETS } from "@/lib/skill-presets";
 
 describe("skills", () => {
   it("parses bounded SKILL.md frontmatter without evaluating YAML", () => {
@@ -60,5 +61,22 @@ required_mcp: [notion]
 
   it("creates a stable readable slug", () => {
     expect(normalizeSkillSlug("Oracle SQL / Review")).toBe("oracle-sql-review");
+  });
+
+  it("keeps every built-in workflow valid and uniquely addressable", () => {
+    const ids = new Set<string>();
+    for (const preset of BUILT_IN_SKILL_PRESETS) {
+      expect(ids.has(preset.id)).toBe(false);
+      ids.add(preset.id);
+      expect(preset.instructions.length).toBeGreaterThan(100);
+      expect(preset.keywords.length).toBeGreaterThan(0);
+      expect(
+        parseSkillMarkdown(preset.instructions, preset),
+      ).toMatchObject({
+        name: preset.name,
+        description: preset.description,
+        version: preset.version,
+      });
+    }
   });
 });

@@ -10,6 +10,7 @@ import {
   type SkillDocument,
   type SkillSummary,
 } from "@/lib/skills";
+import { BUILT_IN_SKILL_PRESETS } from "@/lib/skill-presets";
 import { getDb } from "@/server/db";
 import { skills } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
@@ -43,6 +44,7 @@ function toSummary(skill: typeof skills.$inferSelect): SkillSummary {
     description: skill.description,
     version: skill.version,
     sourceUrl: skill.sourceUrl,
+    builtIn: skill.sourceType === "builtin",
     enabled: skill.enabled,
     autoLoad: skill.autoLoad,
     keywords: skill.keywords ?? [],
@@ -50,6 +52,30 @@ function toSummary(skill: typeof skills.$inferSelect): SkillSummary {
     contentHash: skill.contentHash,
     updatedAt: skill.updatedAt.toISOString(),
   };
+}
+
+async function ensureBuiltInSkills(context: WorkspaceContext) {
+  const values = await Promise.all(
+    BUILT_IN_SKILL_PRESETS.map(async (preset) => ({
+      workspaceId: context.workspaceId,
+      name: preset.name,
+      slug: `builtin-${preset.id}`,
+      description: preset.description,
+      version: preset.version,
+      sourceType: "builtin" as const,
+      sourceUrl: null,
+      instructions: preset.instructions,
+      keywords: preset.keywords,
+      requiredMcp: preset.requiredMcp,
+      contentHash: await hashContent(preset.instructions),
+      enabled: true,
+      autoLoad: true,
+    })),
+  );
+  await getDb()
+    .insert(skills)
+    .values(values)
+    .onConflictDoNothing({ target: [skills.workspaceId, skills.slug] });
 }
 
 function isSkillTableUnavailable(error: unknown) {
@@ -61,6 +87,7 @@ export async function listSkills(
   context: WorkspaceContext,
 ): Promise<SkillSummary[]> {
   try {
+    await ensureBuiltInSkills(context);
     const rows = await getDb()
       .select()
       .from(skills)
@@ -205,6 +232,9 @@ export async function updateSkill(
 ) {
   const existing = await getOwnedSkill(context, skillId);
   if (!existing) return null;
+  if (existing.sourceType === "builtin") {
+    throw new Error("内置 Skill 只能启用或停用，不能修改正文。");
+  }
   await validateSourceUrl(input.sourceUrl);
   const markdown = await resolveMarkdown(input.markdown, input.sourceUrl);
   const document = normalizeDocument({ ...input, markdown });
@@ -231,6 +261,8 @@ export async function updateSkill(
 }
 
 export async function deleteSkill(context: WorkspaceContext, skillId: string) {
+  const existing = await getOwnedSkill(context, skillId);
+  if (!existing || existing.sourceType === "builtin") return false;
   const [deleted] = await getDb()
     .delete(skills)
     .where(
@@ -266,6 +298,7 @@ export async function getEnabledSkillContext(
   query: string,
 ) {
   try {
+    await ensureBuiltInSkills(context);
     const rows = await getDb()
       .select({
         name: skills.name,
