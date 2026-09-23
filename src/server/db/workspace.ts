@@ -1,6 +1,7 @@
 import "server-only";
 
 import { eq } from "drizzle-orm";
+import { getClerkUserProfile } from "@/server/auth/clerk-profile";
 import { getRequestIdentity } from "@/server/auth/session";
 import { getDb, isDatabaseConfigured } from "@/server/db";
 import {
@@ -27,14 +28,41 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext | null> {
   if (!identity) return null;
 
   const db = getDb();
+  const now = new Date();
   const [user] = await db
     .insert(users)
-    .values({ externalAuthId: identity.externalAuthId })
+    .values({
+      externalAuthId: identity.externalAuthId,
+      lastSeenAt: now,
+    })
     .onConflictDoUpdate({
       target: users.externalAuthId,
-      set: { updatedAt: new Date() },
+      set: { lastSeenAt: now, updatedAt: now },
     })
-    .returning({ id: users.id });
+    .returning({
+      id: users.id,
+      status: users.status,
+      email: users.email,
+    });
+
+  if (user.status !== "active") return null;
+
+  if (!user.email && identity.externalAuthId.startsWith("user_")) {
+    try {
+      const profile = await getClerkUserProfile(identity.externalAuthId);
+      await db
+        .update(users)
+        .set({
+          avatarUrl: profile.avatarUrl,
+          displayName: profile.displayName,
+          email: profile.email,
+          updatedAt: now,
+        })
+        .where(eq(users.id, user.id));
+    } catch (error) {
+      console.warn("Unable to synchronize Clerk user profile.", error);
+    }
+  }
 
   const [membership] = await db
     .select({

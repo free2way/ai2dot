@@ -37,6 +37,19 @@ openssl rand -base64 32
 
 配置 `PROVIDER_SECRET_ENCRYPTION_KEY` 后即可添加连接并在线刷新模型目录。后台页面和 API 都会执行账户及工作区管理员权限检查，并显示最近 30 天用量、token、预估费用及供应商健康状态。
 
+## 平台管理控制台
+
+访问 `/console` 查看全平台用户、空间、请求量、Token、知识库存储、资源汇总和管理员审计记录。平台管理员认证独立于 Clerk，支持登录失败锁定、服务端会话、角色权限以及用户停用和恢复；Clerk 用户的邮箱、名称与头像会在首次访问或控制台查看时同步到本地数据库。
+
+先完成数据库迁移，再以交互方式创建或重置管理员。密码只从终端隐藏输入，不会写入仓库或命令行参数：
+
+```bash
+npm run db:migrate
+npm run admin:create -- admin@local
+```
+
+Vercel 部署可先运行 `vercel env pull .env.local` 获取目标环境的 `DATABASE_URL`，再执行管理员创建命令。生产构建中的 `vercel-build` 会自动执行数据库迁移。
+
 ## 外部 MCP 来源
 
 访问 `/admin#mcp-sources` 或在模型管理页向下滚动到“外部 MCP 来源”，即可添加远程 MCP 服务。当前支持 Streamable HTTP（推荐）和 SSE 两种传输方式，可选填写 Bearer Token；地址必须使用 HTTPS，并会阻止解析到内网的主机。

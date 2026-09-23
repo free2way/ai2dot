@@ -58,6 +58,17 @@ export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
   "ready",
   "failed",
 ]);
+export const userStatus = pgEnum("user_status", ["active", "suspended"]);
+export const platformAdminRole = pgEnum("platform_admin_role", [
+  "super_admin",
+  "operator",
+  "auditor",
+]);
+export const platformAdminStatus = pgEnum("platform_admin_status", [
+  "active",
+  "locked",
+  "disabled",
+]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -76,9 +87,87 @@ export const users = pgTable(
     displayName: text("display_name"),
     email: text("email"),
     avatarUrl: text("avatar_url"),
+    status: userStatus("status").notNull().default("active"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspendedReason: text("suspended_reason"),
     ...timestamps,
   },
-  (table) => [uniqueIndex("users_external_auth_id_idx").on(table.externalAuthId)],
+  (table) => [
+    uniqueIndex("users_external_auth_id_idx").on(table.externalAuthId),
+    index("users_status_updated_idx").on(table.status, table.updatedAt),
+    index("users_last_seen_idx").on(table.lastSeenAt),
+  ],
+);
+
+export const platformAdmins = pgTable(
+  "platform_admins",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: platformAdminRole("role").notNull().default("auditor"),
+    status: platformAdminStatus("status").notNull().default("active"),
+    failedLoginCount: integer("failed_login_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("platform_admins_username_idx").on(table.username),
+    index("platform_admins_status_idx").on(table.status),
+  ],
+);
+
+export const platformAdminSessions = pgTable(
+  "platform_admin_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    adminId: uuid("admin_id")
+      .notNull()
+      .references(() => platformAdmins.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_admin_sessions_token_idx").on(table.tokenHash),
+    index("platform_admin_sessions_admin_idx").on(table.adminId),
+    index("platform_admin_sessions_expires_idx").on(table.expiresAt),
+  ],
+);
+
+export const platformAdminAuditLogs = pgTable(
+  "platform_admin_audit_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    adminId: uuid("admin_id").references(() => platformAdmins.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("platform_admin_audit_created_idx").on(table.createdAt),
+    index("platform_admin_audit_admin_idx").on(table.adminId, table.createdAt),
+  ],
 );
 
 export const workspaces = pgTable("workspaces", {
