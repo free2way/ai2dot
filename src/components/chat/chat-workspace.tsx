@@ -63,6 +63,7 @@ import type {
   ConversationListItem,
 } from "@/lib/conversations";
 import { filterConversations } from "@/lib/conversations";
+import { getGreetingText } from "@/lib/greeting";
 import type { KnowledgeBaseSummary } from "@/lib/knowledge";
 import {
   DEFAULT_MODEL_ID,
@@ -82,7 +83,7 @@ const WELCOME_MESSAGES: UIMessage[] = [
     parts: [
       {
         type: "text",
-        text: "晚上好，访客。\n\n我已经准备好和你一起思考、写作或推进项目。今天想先处理什么？",
+        text: "你好，访客。\n\n我已经准备好和你一起思考、写作或推进项目。今天想先处理什么？",
       },
     ],
   },
@@ -305,14 +306,16 @@ export function ChatWorkspace({
   const [contextCompacted, setContextCompacted] = useState(
     initialContextCompacted,
   );
+  const [localHour, setLocalHour] = useState<number | null>(null);
   const welcomeName = initialUserName?.trim() || t("访客");
   const profileName = initialUserName?.trim() || t("访客");
   const profileInitial = profileName.slice(0, 1).toUpperCase();
+  const greeting = getGreetingText(language, localHour);
   const welcomeMessages = useMemo<UIMessage[]>(
     () => language === "en"
-      ? [{ ...WELCOME_MESSAGES[0], parts: [{ type: "text", text: `Good evening, ${welcomeName}.\n\nI’m ready to think, write, or move a project forward with you. What should we tackle first?` }] }]
-      : [{ ...WELCOME_MESSAGES[0], parts: [{ type: "text", text: `晚上好，${welcomeName}。\n\n我已经准备好和你一起思考、写作或推进项目。今天想先处理什么？` }] }],
-    [language, welcomeName],
+      ? [{ ...WELCOME_MESSAGES[0], parts: [{ type: "text", text: `${greeting}, ${welcomeName}.\n\nI’m ready to think, write, or move a project forward with you. What should we tackle first?` }] }]
+      : [{ ...WELCOME_MESSAGES[0], parts: [{ type: "text", text: `${greeting}，${welcomeName}。\n\n我已经准备好和你一起思考、写作或推进项目。今天想先处理什么？` }] }],
+    [greeting, language, welcomeName],
   );
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -334,6 +337,21 @@ export function ChatWorkspace({
     throttle: 24,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   });
+
+  useEffect(() => {
+    const updateLocalHour = () => setLocalHour(new Date().getHours());
+    updateLocalHour();
+    const timer = window.setInterval(updateLocalHour, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === "dot-welcome" ? welcomeMessages[0] : message,
+      ),
+    );
+  }, [setMessages, welcomeMessages]);
 
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? models[0];
   const supportsDeepThinking = selectedModel?.capabilities.includes("reasoning") ?? false;
