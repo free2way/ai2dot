@@ -7,6 +7,16 @@ const nextConfig: NextConfig = {
   deploymentId: process.env.DEPLOYMENT_VERSION || undefined,
   output: "standalone",
   poweredByHeader: false,
+  async redirects() {
+    return [
+      {
+        source: "/",
+        has: [{ type: "host", value: "ai.ai2dot.com" }],
+        destination: "/workspace",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {
