@@ -1,0 +1,171 @@
+name: ai2dot
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.6-pg17-bookworm
+    restart: unless-stopped
+    shm_size: ${POSTGRES_SHM_SIZE:-256mb}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai2dot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_USER: ${POSTGRES_USER:-ai2dot}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-1GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-8MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
+      - -c
+      - wal_compression=on
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 60s
+
+  app:
+    image: ai2dot:${AI2DOT_IMAGE_TAG:-latest}
+    build:
+      context: .
+      target: runner
+      args:
+        AI2DOT_REVERSE_PROXY: "true"
+        DEPLOYMENT_VERSION: ${AI2DOT_IMAGE_TAG:-}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-/sign-in}
+        NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-/sign-up}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    environment:
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      AI2DOT_AUTH_MODE: ${AI2DOT_AUTH_MODE:-local}
+      AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE: ${AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE:-30}
+      AI2DOT_COOKIE_SECURE: ${AI2DOT_COOKIE_SECURE:-false}
+      AI2DOT_ENABLE_AI_GATEWAY: ${AI2DOT_ENABLE_AI_GATEWAY:-false}
+      AI2DOT_EMBEDDING_API_KEY: ${AI2DOT_EMBEDDING_API_KEY:-}
+      AI2DOT_EMBEDDING_BASE_URL: ${AI2DOT_EMBEDDING_BASE_URL:-}
+      AI2DOT_EMBEDDING_MODEL: ${AI2DOT_EMBEDDING_MODEL:-openai/text-embedding-3-small}
+      AI2DOT_EMBEDDING_PROVIDER_NAME: ${AI2DOT_EMBEDDING_PROVIDER_NAME:-}
+      AI2DOT_LOCAL_AUTH_EMAIL: ${AI2DOT_LOCAL_AUTH_EMAIL:-}
+      AI2DOT_LOCAL_AUTH_PASSWORD_HASH: ${AI2DOT_LOCAL_AUTH_PASSWORD_HASH:-}
+      AI2DOT_SESSION_SECRET: ${AI2DOT_SESSION_SECRET:-}
+      AI2DOT_SESSION_TTL_HOURS: ${AI2DOT_SESSION_TTL_HOURS:-168}
+      AI2DOT_TOOL_APPROVAL_SECRET: ${AI2DOT_TOOL_APPROVAL_SECRET:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ai2dot}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-ai2dot}}
+      KEEP_ALIVE_TIMEOUT: ${AI2DOT_KEEP_ALIVE_TIMEOUT_MS:-65000}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-/sign-in}
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-/sign-up}
+      NODE_OPTIONS: --max-old-space-size=${AI2DOT_NODE_MEMORY_MB:-768}
+      PROVIDER_SECRET_ENCRYPTION_KEY: ${PROVIDER_SECRET_ENCRYPTION_KEY:-}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    init: true
+
+  embedding-worker:
+    image: ai2dot:${AI2DOT_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      CRON_SECRET: ${CRON_SECRET:-}
+    command:
+      - node
+      - -e
+      - |
+        let running = false;
+        async function tick() {
+          if (running || !process.env.CRON_SECRET) return;
+          running = true;
+          try {
+            const response = await fetch('http://app:3000/api/cron/knowledge-embeddings', {
+              headers: { authorization: `Bearer $${process.env.CRON_SECRET}` },
+              signal: AbortSignal.timeout(290000),
+            });
+            if (!response.ok) console.error('embedding worker request failed', response.status);
+          } catch (error) {
+            console.error('embedding worker request failed', error);
+          } finally {
+            running = false;
+          }
+        }
+        void tick();
+        setInterval(tick, 30000);
+    init: true
+
+  proxy:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${AI2DOT_PORT:-3000}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx-cache:/var/cache/nginx
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1/nginx-health]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  migrate:
+    profiles: [tools]
+    build:
+      context: .
+      target: migrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ai2dot}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-ai2dot}}
+      DATABASE_URL_UNPOOLED: ${DATABASE_URL_UNPOOLED:-}
+    restart: "no"
+
+  backup:
+    profiles: [tools]
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_DB: ${POSTGRES_DB:-ai2dot}
+      POSTGRES_USER: ${POSTGRES_USER:-ai2dot}
+    volumes:
+      - ./backups:/backups
+    command:
+      - sh
+      - -c
+      - pg_dump -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "/backups/ai2dot-$$(date +%Y%m%d-%H%M%S).dump"
+    restart: "no"
+
+volumes:
+  nginx-cache:
+  postgres-data:

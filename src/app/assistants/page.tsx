@@ -1,29 +1,40 @@
 import { redirect } from "next/navigation";
 import { AssistantManager } from "@/components/assistants/assistant-manager";
 import { FEATURED_MODELS } from "@/lib/models";
-import { isClerkConfigured } from "@/server/auth/config";
+import { isAuthConfigured } from "@/server/auth/config";
 import { listAssistants } from "@/server/assistants/store";
 import {
   getWorkspaceContext,
   isPersistenceConfigured,
 } from "@/server/db/workspace";
 import { listKnowledgeBases } from "@/server/knowledge/store";
+import { listMcpSources } from "@/server/mcp/store";
 import { listEnabledChatModels } from "@/server/providers/store";
 
+export const dynamic = "force-dynamic";
+
 export default async function AssistantsPage() {
-  if (!isClerkConfigured() || !isPersistenceConfigured()) redirect("/");
+  if (!isAuthConfigured() || !isPersistenceConfigured()) redirect("/");
   const context = await getWorkspaceContext();
   if (!context) redirect("/sign-in");
-  const [assistants, models, knowledgeBases] = await Promise.all([
+  const [assistants, models, knowledgeBases, mcpSources] = await Promise.all([
     listAssistants(context),
     listEnabledChatModels(context),
     listKnowledgeBases(context),
+    listMcpSources(context),
   ]);
   return (
     <AssistantManager
       initialAssistants={assistants}
       models={models.length > 0 ? models : FEATURED_MODELS}
       knowledgeBases={knowledgeBases}
+      mcpSources={mcpSources
+        .filter((source) => source.enabled)
+        .map((source) => ({
+          id: source.id,
+          name: source.name,
+          toolCount: source.tools.length,
+        }))}
     />
   );
 }

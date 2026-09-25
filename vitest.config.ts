@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    exclude: ["extension/**", "node_modules/**", ".next/**"],
     coverage: {
       reporter: ["text", "json", "html"],
     },

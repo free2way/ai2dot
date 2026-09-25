@@ -76,6 +76,7 @@ export async function createConversation(
             welcomeMessage: assistant.welcomeMessage,
             defaultModelKey: assistant.defaultModelKey,
             knowledgeBaseIds: assistant.knowledgeBaseIds,
+            mcpSourceIds: assistant.mcpSourceIds,
           }
         : undefined,
       title: input.title || "新对话",

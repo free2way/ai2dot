@@ -7,6 +7,7 @@ import {
   Check,
   Database,
   MessageSquareText,
+  PlugZap,
   Plus,
   Save,
   Sparkles,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BrandMark } from "@/components/brand-mark";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import {
@@ -29,6 +30,7 @@ type Props = {
   initialAssistants: AssistantSummary[];
   models: ModelCatalogEntry[];
   knowledgeBases: KnowledgeBaseSummary[];
+  mcpSources?: { id: string; name: string; toolCount: number }[];
 };
 
 function formFromAssistant(assistant: AssistantSummary): AssistantInput {
@@ -40,6 +42,7 @@ function formFromAssistant(assistant: AssistantSummary): AssistantInput {
     welcomeMessage: assistant.welcomeMessage ?? "",
     defaultModelKey: assistant.defaultModelKey ?? "",
     knowledgeBaseIds: assistant.knowledgeBaseIds,
+    mcpSourceIds: assistant.mcpSourceIds ?? [],
   };
 }
 
@@ -47,6 +50,7 @@ export function AssistantManager({
   initialAssistants,
   models,
   knowledgeBases,
+  mcpSources = [],
 }: Props) {
   const { t } = useLanguage();
   const router = useRouter();
@@ -62,10 +66,12 @@ export function AssistantManager({
           defaultModelKey: models[0]?.id ?? "",
         },
   );
-  const [isCreating, setIsCreating] = useState(initialAssistants.length === 0);
-  const [dirty, setDirty] = useState(initialAssistants.length === 0);
+  const [isCreating, setIsCreating] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const editorRef = useRef<HTMLFormElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const selectedAssistant = assistants.find((assistant) => assistant.id === selectedId);
   const groupedModels = useMemo(() => {
@@ -75,6 +81,18 @@ export function AssistantManager({
     }
     return [...groups.entries()];
   }, [models]);
+
+  useEffect(() => {
+    if (!isCreating) return;
+    nameInputRef.current?.focus();
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 760px)").matches &&
+      typeof editorRef.current?.scrollIntoView === "function"
+    ) {
+      editorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [isCreating]);
 
   const updateForm = <Key extends keyof AssistantInput>(
     key: Key,
@@ -94,13 +112,19 @@ export function AssistantManager({
   };
 
   const createNew = () => {
-    setSelectedId(undefined);
     setForm({
       ...ORACLE_ASSISTANT_TEMPLATE,
       defaultModelKey: models[0]?.id ?? "",
     });
     setIsCreating(true);
     setDirty(true);
+    setNotice(undefined);
+  };
+
+  const cancelCreate = () => {
+    if (selectedAssistant) setForm(formFromAssistant(selectedAssistant));
+    setIsCreating(false);
+    setDirty(false);
     setNotice(undefined);
   };
 
@@ -190,7 +214,15 @@ export function AssistantManager({
       const remaining = assistants.filter((assistant) => assistant.id !== selectedAssistant.id);
       setAssistants(remaining);
       if (remaining[0]) selectAssistant(remaining[0]);
-      else createNew();
+      else {
+        setSelectedId(undefined);
+        setIsCreating(false);
+        setDirty(false);
+        setForm({
+          ...ORACLE_ASSISTANT_TEMPLATE,
+          defaultModelKey: models[0]?.id ?? "",
+        });
+      }
       setNotice("助手已删除，历史会话不受影响。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "助手删除失败。");
@@ -206,6 +238,13 @@ export function AssistantManager({
     updateForm("knowledgeBaseIds", next);
   };
 
+  const toggleMcpSource = (id: string) => {
+    const next = form.mcpSourceIds.includes(id)
+      ? form.mcpSourceIds.filter((item) => item !== id)
+      : [...form.mcpSourceIds, id].slice(-10);
+    updateForm("mcpSourceIds", next);
+  };
+
   return (
     <main className="assistant-shell">
       <header className="admin-topbar">
@@ -217,7 +256,7 @@ export function AssistantManager({
         <aside className="assistant-navigation">
           <div className="assistant-navigation-head">
             <div><p className="eyebrow">ASSISTANTS</p><h1>{t("助手")}</h1></div>
-            <button onClick={createNew} aria-label={t("新建助手")}><Plus size={17} /></button>
+            <button onClick={createNew} aria-label={t("新建助手")} type="button"><Plus size={17} /></button>
           </div>
           <p className="assistant-intro">{t("保存角色、模型和知识，让每次新会话从正确的上下文开始。")}</p>
           <div className="assistant-list">
@@ -233,17 +272,30 @@ export function AssistantManager({
               </button>
             ))}
           </div>
-          <button className="assistant-new-button" onClick={createNew}><Plus size={15} /> {t("新建助手")}</button>
+          <button className="assistant-new-button" onClick={createNew} type="button"><Plus size={15} /> {t("新建助手")}</button>
         </aside>
 
-        <form className="assistant-editor" onSubmit={save}>
+        {!isCreating && !selectedAssistant ? (
+          <section className="assistant-editor assistant-empty-state">
+            <div>
+              <span className="assistant-empty-icon"><Bot size={26} /></span>
+              <p className="eyebrow">ASSISTANT WORKSPACE</p>
+              <h2>{t("还没有助手")}</h2>
+              <p>{t("创建一个助手，为它设置专用模型、系统指令和知识库。")}</p>
+              {notice && <p className="assistant-empty-feedback" role="status">{notice}</p>}
+              <button className="admin-primary" onClick={createNew} type="button"><Plus size={15} /> {t("创建第一个助手")}</button>
+            </div>
+          </section>
+        ) : (
+        <form className="assistant-editor" onSubmit={save} ref={editorRef}>
           <div className="assistant-editor-head">
             <div className="assistant-identity">
               <span className="assistant-avatar is-large">{form.avatar || form.name.slice(0, 2) || "AI"}</span>
               <div><p className="eyebrow">{isCreating ? t("新助手") : t("助手档案")}</p><h2>{form.name || t("未命名助手")}</h2><p>{dirty ? t("配置有未保存的更改") : t("配置已保存到当前工作区")}</p></div>
             </div>
             <div className="assistant-editor-actions">
-              {selectedAssistant && <button className="assistant-delete" disabled={busy} onClick={() => void removeAssistant()} type="button"><Trash2 size={14} /> {t("删除")}</button>}
+              {isCreating && <button className="assistant-delete" disabled={busy} onClick={cancelCreate} type="button">{t("取消")}</button>}
+              {!isCreating && selectedAssistant && <button className="assistant-delete" disabled={busy} onClick={() => void removeAssistant()} type="button"><Trash2 size={14} /> {t("删除")}</button>}
               <button className="knowledge-secondary" disabled={busy || !dirty} type="submit"><Save size={14} /> {t("保存")}</button>
               <button className="admin-primary" disabled={busy} onClick={() => void startConversation()} type="button"><MessageSquareText size={15} /> {t("开始对话")}</button>
             </div>
@@ -255,7 +307,7 @@ export function AssistantManager({
             <section className="assistant-form-section">
               <div className="assistant-section-heading"><span><Bot size={15} /> {t("基本信息")}</span><small>{t("用于识别和开始会话")}</small></div>
               <div className="assistant-field-row">
-                <label><span>{t("名称")}</span><input maxLength={80} value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder={t("例如：Oracle 专家")} /></label>
+                <label><span>{t("名称")}</span><input ref={nameInputRef} maxLength={80} value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder={t("例如：Oracle 专家")} /></label>
                 <label className="assistant-avatar-field"><span>{t("标识")}</span><input maxLength={3} value={form.avatar} onChange={(event) => updateForm("avatar", event.target.value.toUpperCase())} placeholder="OR" /></label>
               </div>
               <label><span>{t("说明")}</span><input maxLength={240} value={form.description} onChange={(event) => updateForm("description", event.target.value)} placeholder={t("这个助手适合处理什么任务")} /></label>
@@ -282,8 +334,24 @@ export function AssistantManager({
                 <div className="assistant-empty-knowledge"><p>{t("还没有知识库。")}</p><Link href="/knowledge">{t("创建知识库")} <ArrowUpRight size={13} /></Link></div>
               )}
             </section>
+
+            <section className="assistant-form-section assistant-knowledge-section">
+              <div className="assistant-section-heading"><span><PlugZap size={15} /> {t("允许的 MCP 来源")}</span><small>{form.mcpSourceIds.length} / 10</small></div>
+              <p className="assistant-section-help">{t("助手只能调用这里明确允许的来源。写入、删除和风险未知的工具仍会在执行前请求确认。")}</p>
+              {mcpSources.length > 0 ? (
+                <div className="assistant-knowledge-list">
+                  {mcpSources.map((source) => {
+                    const active = form.mcpSourceIds.includes(source.id);
+                    return <button aria-pressed={active} data-active={active} key={source.id} onClick={() => toggleMcpSource(source.id)} type="button"><PlugZap size={14} /><span><strong>{source.name}</strong><small>{source.toolCount} {t("个工具")}</small></span>{active && <Check size={14} />}</button>;
+                  })}
+                </div>
+              ) : (
+                <div className="assistant-empty-knowledge"><p>{t("还没有启用的 MCP 来源。")}</p><Link href="/admin#mcp-sources">{t("管理 MCP 来源")} <ArrowUpRight size={13} /></Link></div>
+              )}
+            </section>
           </div>
         </form>
+        )}
       </div>
     </main>
   );

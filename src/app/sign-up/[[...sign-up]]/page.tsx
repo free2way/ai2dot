@@ -1,11 +1,14 @@
 import { SignUp } from "@clerk/nextjs";
 import { ArrowLeft, UserPlus } from "lucide-react";
 import Link from "next/link";
-import { isClerkConfigured } from "@/server/auth/config";
+import { getAuthMode } from "@/server/auth/config";
 import { LanguageSwitcher } from "@/lib/i18n";
 
+export const dynamic = "force-dynamic";
+
 export default function SignUpPage() {
-  if (isClerkConfigured()) {
+  const authMode = getAuthMode();
+  if (authMode === "clerk") {
     return (
       <main className="auth-shell">
         <LanguageSwitcher />
@@ -13,6 +16,26 @@ export default function SignUpPage() {
           <ArrowLeft size={16} /> 返回工作台
         </Link>
         <SignUp appearance={{ variables: { colorPrimary: "#171914" } }} />
+      </main>
+    );
+  }
+
+  if (authMode === "local") {
+    return (
+      <main className="auth-shell">
+        <LanguageSwitcher />
+        <Link className="auth-back" href="/">
+          <ArrowLeft size={16} /> 返回首页
+        </Link>
+        <section className="auth-setup">
+          <div className="auth-icon"><UserPlus size={22} /></div>
+          <p className="eyebrow">LOCAL ACCOUNT</p>
+          <h1>账号由管理员管理</h1>
+          <p>本地部署使用服务器配置的管理员账号，不开放在线注册。</p>
+          <Link className="primary-link" href="/sign-in">
+            前往登录 <ArrowLeft size={15} />
+          </Link>
+        </section>
       </main>
     );
   }

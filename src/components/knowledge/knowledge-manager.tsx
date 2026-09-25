@@ -35,6 +35,12 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1_048_576).toFixed(1)} MB`;
 }
 
+function retrievalModeLabel(mode: KnowledgeSearchResult["retrievalMode"]) {
+  if (mode === "hybrid") return "混合召回";
+  if (mode === "semantic") return "语义召回";
+  return "关键词召回";
+}
+
 export function KnowledgeManager({
   initialKnowledgeBases,
 }: {
@@ -100,7 +106,10 @@ export function KnowledgeManager({
   }, [selectedId]);
 
   const hasProcessingDocuments = documents.some(
-    (document) => document.status === "processing",
+    (document) =>
+      document.status === "processing" ||
+      document.embeddingStatus === "pending" ||
+      document.embeddingStatus === "processing",
   );
 
   useEffect(() => {
@@ -111,7 +120,12 @@ export function KnowledgeManager({
         .then((nextDocuments) => {
           if (
             !cancelled &&
-            nextDocuments.every((document) => document.status !== "processing")
+            nextDocuments.every(
+              (document) =>
+                document.status !== "processing" &&
+                document.embeddingStatus !== "pending" &&
+                document.embeddingStatus !== "processing",
+            )
           ) {
             void refresh(selectedId);
           }
@@ -281,6 +295,7 @@ export function KnowledgeManager({
               <div className="knowledge-stats">
                 <div><small>{t("文档")}</small><strong>{selectedBase.documentCount}</strong></div>
                 <div><small>{t("可检索片段")}</small><strong>{selectedBase.chunkCount}</strong></div>
+                <div><small>{t("语义片段")}</small><strong>{selectedBase.semanticChunkCount}</strong></div>
                 <div><small>{t("状态")}</small><strong><i data-busy={hasProcessingDocuments} /> {hasProcessingDocuments ? t("正在索引") : documents.some((document) => document.status === "failed") ? t("部分失败") : t("已就绪")}</strong></div>
               </div>
 
@@ -296,7 +311,7 @@ export function KnowledgeManager({
                   <div className="knowledge-section-title"><span>{t("检索结果")}</span><small>{results.length} {t("相关片段")}</small></div>
                   {results.map((result) => (
                     <article key={result.chunkId}>
-                      <div><FileSearch size={15} /><strong>{result.documentName}</strong><small>{t("相关度")} {Math.round(result.score * 100)}%</small></div>
+                      <div><FileSearch size={15} /><strong>{result.documentName}</strong><small>{retrievalModeLabel(result.retrievalMode)} · {t("相关度")} {Math.round(result.score * 100)}%</small></div>
                       <p>{result.content}</p>
                     </article>
                   ))}
@@ -307,8 +322,8 @@ export function KnowledgeManager({
                   {documents.length > 0 ? documents.map((document) => (
                     <div className="knowledge-document-row" key={document.id}>
                       <span className="knowledge-file-icon"><FileText size={17} /></span>
-                      <span><strong>{document.name}</strong><small>{formatBytes(document.byteSize)} · {document.characterCount.toLocaleString()} 字符 · {document.chunkCount} 个片段{document.errorMessage ? ` · ${document.errorMessage}` : ""}</small></span>
-                      <em data-status={document.status}>{document.status === "ready" ? t("可检索") : document.status === "processing" ? t("解析中") : t("失败")}</em>
+                      <span><strong>{document.name}</strong><small>{formatBytes(document.byteSize)} · {document.characterCount.toLocaleString()} 字符 · {document.chunkCount} 个片段 · {document.embeddedChunkCount} 个语义向量{document.errorMessage ? ` · ${document.errorMessage}` : document.embeddingError ? ` · ${document.embeddingError}` : ""}</small></span>
+                      <em data-status={document.status === "failed" || document.embeddingStatus === "failed" ? "failed" : document.status === "processing" || document.embeddingStatus === "processing" || document.embeddingStatus === "pending" ? "processing" : "ready"}>{document.status === "failed" || document.embeddingStatus === "failed" ? t("失败") : document.status === "processing" ? t("解析中") : document.embeddingStatus === "ready" ? t("混合检索") : t("语义索引中")}</em>
                       <button disabled={busy} onClick={() => void removeDocument(document)} aria-label={`删除 ${document.name}`}><Trash2 size={15} /></button>
                     </div>
                   )) : (

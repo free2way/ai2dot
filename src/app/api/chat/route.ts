@@ -15,7 +15,7 @@ import { z } from "zod";
 import { createKnowledgeSourceParts } from "@/lib/chat-sources";
 import { DEFAULT_MODEL_ID, isFeaturedModel } from "@/lib/models";
 import { estimateUsageCostUsd } from "@/lib/operations";
-import { isClerkConfigured } from "@/server/auth/config";
+import { isAuthConfigured } from "@/server/auth/config";
 import { getRequestIdentity } from "@/server/auth/session";
 import { getAssistant } from "@/server/assistants/store";
 import {
@@ -51,6 +51,12 @@ import {
 } from "@/server/generations/store";
 import { searchKnowledge } from "@/server/knowledge/store";
 import { logServerEvent } from "@/server/observability/log";
+import {
+  markToolExecutionFinished,
+  markToolExecutionStarted,
+  recordApprovalResponses,
+  recordToolApprovalRequest,
+} from "@/server/mcp/audit";
 import { getEnabledMcpTools } from "@/server/mcp/store";
 import { resolveChatModel } from "@/server/providers/store";
 import { consumeChatRateLimit } from "@/server/rate-limit/chat";
@@ -65,6 +71,7 @@ const chatRequestSchema = z.object({
   branchId: z.string().uuid().optional(),
   idempotencyKey: z.string().uuid().optional(),
   knowledgeBaseIds: z.array(z.string().uuid()).max(3).optional().default([]),
+  mcpSourceIds: z.array(z.string().uuid()).max(10).optional().default([]),
   reasoning: z.enum(["provider-default", "high"]).optional().default("provider-default"),
 });
 
@@ -202,11 +209,12 @@ export async function POST(request: Request) {
   const needsWorkspace =
     Boolean(parsed.data.conversationId) ||
     modelId.startsWith("db:") ||
-    parsed.data.knowledgeBaseIds.length > 0;
+    parsed.data.knowledgeBaseIds.length > 0 ||
+    parsed.data.mcpSourceIds.length > 0;
   const workspaceContext = needsWorkspace ? await getWorkspaceContext() : null;
   const gatewayConfigured = isAiGatewayConfigured();
   const requestIdentity =
-    gatewayConfigured && isClerkConfigured()
+    gatewayConfigured && isAuthConfigured()
       ? await getRequestIdentity()
       : null;
 
@@ -219,6 +227,12 @@ export async function POST(request: Request) {
   if (parsed.data.knowledgeBaseIds.length > 0 && !workspaceContext) {
     return Response.json(
       { code: "KNOWLEDGE_UNAVAILABLE", message: "请登录后使用知识库。" },
+      { status: 401 },
+    );
+  }
+  if (parsed.data.mcpSourceIds.length > 0 && !workspaceContext) {
+    return Response.json(
+      { code: "MCP_UNAVAILABLE", message: "请登录后使用 MCP 工具。" },
       { status: 401 },
     );
   }
@@ -279,6 +293,7 @@ export async function POST(request: Request) {
     modelId,
     conversationId: parsed.data.conversationId,
     knowledgeBaseCount: parsed.data.knowledgeBaseIds.length,
+    mcpSourceCount: parsed.data.mcpSourceIds.length,
     reasoning: parsed.data.reasoning,
   });
 
@@ -287,7 +302,7 @@ export async function POST(request: Request) {
   let modelPricing: Record<string, string> | null | undefined;
   let modelAvailable = isFeaturedModel(modelId)
     ? gatewayConfigured &&
-      (!isClerkConfigured() || Boolean(requestIdentity))
+      (!isAuthConfigured() || Boolean(requestIdentity))
     : false;
   let gatewayRouted = isFeaturedModel(modelId);
   let responseMode = "gateway";
@@ -343,6 +358,7 @@ export async function POST(request: Request) {
       modelId,
       messages,
       knowledgeBaseIds: [...parsed.data.knowledgeBaseIds].sort(),
+      mcpSourceIds: [...parsed.data.mcpSourceIds].sort(),
       reasoning: parsed.data.reasoning,
     });
     const begun = await beginGeneration({
@@ -474,6 +490,16 @@ export async function POST(request: Request) {
       ? await getAssistant(persistence.context, conversationContext.assistantId)
       : null;
   const assistantContext = conversationContext?.assistantSnapshot ?? liveAssistant;
+  if (workspaceContext) {
+    try {
+      await recordApprovalResponses(workspaceContext, messages);
+    } catch (error) {
+      logServerEvent("warn", "mcp.audit_approval_failed", {
+        requestId: requestLogId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   const contextPlan = planConversationContext({
     messages,
     summary: branchContext?.contextSummary,
@@ -546,8 +572,11 @@ export async function POST(request: Request) {
       ? "\n\n用户启用了知识库，但本次问题没有检索到相关资料。不要声称已从知识库找到答案。"
       : "";
   const knowledgeSources = createKnowledgeSourceParts(knowledgeResults);
+  const allowedMcpSourceIds = assistantContext
+    ? assistantContext.mcpSourceIds ?? []
+    : parsed.data.mcpSourceIds;
   const mcpSession = workspaceContext
-    ? await getEnabledMcpTools(workspaceContext)
+    ? await getEnabledMcpTools(workspaceContext, allowedMcpSourceIds)
     : null;
   const skillContext = workspaceContext
     ? await getEnabledSkillContext(workspaceContext, getLatestUserText(messages))
@@ -561,10 +590,19 @@ export async function POST(request: Request) {
     reasoning: parsed.data.reasoning,
     system: `${SYSTEM_PROMPT}${assistantPrompt}${skillContext.prompt}${summaryPrompt}${knowledgePrompt}`,
     messages: await convertToModelMessages(messagesForModel),
+    timeout: { totalMs: 42_000, stepMs: 30_000, toolMs: 12_000 },
     ...(mcpSession && Object.keys(mcpSession.tools).length > 0
       ? {
           tools: mcpSession.tools,
           stopWhen: isStepCount(5),
+          toolApproval: ({ toolCall }) =>
+            mcpSession.metadata.get(toolCall.toolName)?.risk === "read"
+              ? "approved"
+              : "user-approval",
+          experimental_toolApprovalSecret:
+            process.env.AI2DOT_TOOL_APPROVAL_SECRET ||
+            process.env.AI2DOT_SESSION_SECRET ||
+            process.env.PROVIDER_SECRET_ENCRYPTION_KEY,
         }
       : {}),
     ...(gatewayRouted
@@ -580,6 +618,74 @@ export async function POST(request: Request) {
         }
       : {}),
     abortSignal: request.signal,
+    async onStepEnd(step) {
+      if (!workspaceContext || !mcpSession) return;
+      for (const part of step.content) {
+        if (part.type !== "tool-approval-request") continue;
+        const metadata = mcpSession.metadata.get(part.toolCall.toolName);
+        if (!metadata) continue;
+        try {
+          await recordToolApprovalRequest({
+            context: {
+              workspace: workspaceContext,
+              conversationId: parsed.data.conversationId,
+              generationId: persistence?.generation.id,
+            },
+            approvalId: part.approvalId,
+            toolCallId: part.toolCall.toolCallId,
+            toolName: part.toolCall.toolName,
+            input: part.toolCall.input,
+            metadata,
+          });
+        } catch (error) {
+          logServerEvent("warn", "mcp.audit_request_failed", {
+            requestId: requestLogId,
+            toolName: part.toolCall.toolName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    },
+    async onToolExecutionStart({ toolCall }) {
+      if (!workspaceContext || !mcpSession) return;
+      const metadata = mcpSession.metadata.get(toolCall.toolName);
+      if (!metadata) return;
+      try {
+        await markToolExecutionStarted(
+          {
+            workspace: workspaceContext,
+            conversationId: parsed.data.conversationId,
+            generationId: persistence?.generation.id,
+          },
+          toolCall,
+          metadata,
+        );
+      } catch (error) {
+        logServerEvent("warn", "mcp.audit_start_failed", {
+          requestId: requestLogId,
+          toolName: toolCall.toolName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    async onToolExecutionEnd({ toolCall, toolOutput }) {
+      if (!workspaceContext) return;
+      try {
+        await markToolExecutionFinished({
+          context: workspaceContext,
+          toolCallId: toolCall.toolCallId,
+          ...(toolOutput.type === "tool-result"
+            ? { output: toolOutput.output }
+            : { error: toolOutput.error }),
+        });
+      } catch (error) {
+        logServerEvent("warn", "mcp.audit_finish_failed", {
+          requestId: requestLogId,
+          toolName: toolCall.toolName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
     onError({ error }) {
       void mcpSession?.close();
       logServerEvent("error", "chat.failed", {

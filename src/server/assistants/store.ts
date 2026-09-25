@@ -6,8 +6,10 @@ import { normalizeAssistantAvatar } from "@/lib/assistants";
 import { getDb } from "@/server/db";
 import {
   assistantKnowledgeBases,
+  assistantMcpSources,
   assistants,
   knowledgeBases,
+  mcpSources,
 } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
 
@@ -28,6 +30,24 @@ async function ownedKnowledgeBaseIds(
   return rows.map((row) => row.id);
 }
 
+async function ownedEnabledMcpSourceIds(
+  context: WorkspaceContext,
+  sourceIds: string[],
+) {
+  if (sourceIds.length === 0) return [];
+  const rows = await getDb()
+    .select({ id: mcpSources.id })
+    .from(mcpSources)
+    .where(
+      and(
+        eq(mcpSources.workspaceId, context.workspaceId),
+        eq(mcpSources.enabled, true),
+        inArray(mcpSources.id, sourceIds),
+      ),
+    );
+  return rows.map((row) => row.id);
+}
+
 export async function listAssistants(
   context: WorkspaceContext,
 ): Promise<AssistantSummary[]> {
@@ -39,20 +59,29 @@ export async function listAssistants(
     .orderBy(desc(assistants.updatedAt));
   if (rows.length === 0) return [];
 
-  const links = await db
-    .select()
-    .from(assistantKnowledgeBases)
-    .where(
-      inArray(
-        assistantKnowledgeBases.assistantId,
-        rows.map((row) => row.id),
-      ),
-    );
+  const assistantIds = rows.map((row) => row.id);
+  const [links, mcpLinks] = await Promise.all([
+    db
+      .select()
+      .from(assistantKnowledgeBases)
+      .where(inArray(assistantKnowledgeBases.assistantId, assistantIds)),
+    db
+      .select()
+      .from(assistantMcpSources)
+      .where(inArray(assistantMcpSources.assistantId, assistantIds)),
+  ]);
   const knowledgeByAssistant = new Map<string, string[]>();
   for (const link of links) {
     knowledgeByAssistant.set(link.assistantId, [
       ...(knowledgeByAssistant.get(link.assistantId) ?? []),
       link.knowledgeBaseId,
+    ]);
+  }
+  const mcpByAssistant = new Map<string, string[]>();
+  for (const link of mcpLinks) {
+    mcpByAssistant.set(link.assistantId, [
+      ...(mcpByAssistant.get(link.assistantId) ?? []),
+      link.mcpSourceId,
     ]);
   }
 
@@ -65,6 +94,7 @@ export async function listAssistants(
     welcomeMessage: row.welcomeMessage,
     defaultModelKey: row.defaultModelKey,
     knowledgeBaseIds: knowledgeByAssistant.get(row.id) ?? [],
+    mcpSourceIds: mcpByAssistant.get(row.id) ?? [],
     updatedAt: row.updatedAt.toISOString(),
   }));
 }
@@ -85,13 +115,20 @@ export async function getAssistant(
     .limit(1);
   if (!assistant) return null;
 
-  const links = await getDb()
-    .select({ knowledgeBaseId: assistantKnowledgeBases.knowledgeBaseId })
-    .from(assistantKnowledgeBases)
-    .where(eq(assistantKnowledgeBases.assistantId, assistantId));
+  const [links, mcpLinks] = await Promise.all([
+    getDb()
+      .select({ knowledgeBaseId: assistantKnowledgeBases.knowledgeBaseId })
+      .from(assistantKnowledgeBases)
+      .where(eq(assistantKnowledgeBases.assistantId, assistantId)),
+    getDb()
+      .select({ mcpSourceId: assistantMcpSources.mcpSourceId })
+      .from(assistantMcpSources)
+      .where(eq(assistantMcpSources.assistantId, assistantId)),
+  ]);
   return {
     ...assistant,
     knowledgeBaseIds: links.map((link) => link.knowledgeBaseId),
+    mcpSourceIds: mcpLinks.map((link) => link.mcpSourceId),
   };
 }
 
@@ -118,6 +155,26 @@ async function replaceKnowledgeBases(
   return knowledgeBaseIds;
 }
 
+async function replaceMcpSources(
+  context: WorkspaceContext,
+  assistantId: string,
+  requestedIds: string[],
+) {
+  const mcpSourceIds = await ownedEnabledMcpSourceIds(
+    context,
+    [...new Set(requestedIds)].slice(0, 10),
+  );
+  await getDb()
+    .delete(assistantMcpSources)
+    .where(eq(assistantMcpSources.assistantId, assistantId));
+  if (mcpSourceIds.length > 0) {
+    await getDb().insert(assistantMcpSources).values(
+      mcpSourceIds.map((mcpSourceId) => ({ assistantId, mcpSourceId })),
+    );
+  }
+  return mcpSourceIds;
+}
+
 export async function createAssistant(
   context: WorkspaceContext,
   input: AssistantInput,
@@ -134,12 +191,11 @@ export async function createAssistant(
       defaultModelKey: input.defaultModelKey || null,
     })
     .returning();
-  const knowledgeBaseIds = await replaceKnowledgeBases(
-    context,
-    assistant.id,
-    input.knowledgeBaseIds,
-  );
-  return { ...assistant, knowledgeBaseIds };
+  const [knowledgeBaseIds, mcpSourceIds] = await Promise.all([
+    replaceKnowledgeBases(context, assistant.id, input.knowledgeBaseIds),
+    replaceMcpSources(context, assistant.id, input.mcpSourceIds),
+  ]);
+  return { ...assistant, knowledgeBaseIds, mcpSourceIds };
 }
 
 export async function updateAssistant(
@@ -166,12 +222,11 @@ export async function updateAssistant(
     )
     .returning();
   if (!assistant) return null;
-  const knowledgeBaseIds = await replaceKnowledgeBases(
-    context,
-    assistantId,
-    input.knowledgeBaseIds,
-  );
-  return { ...assistant, knowledgeBaseIds };
+  const [knowledgeBaseIds, mcpSourceIds] = await Promise.all([
+    replaceKnowledgeBases(context, assistantId, input.knowledgeBaseIds),
+    replaceMcpSources(context, assistantId, input.mcpSourceIds),
+  ]);
+  return { ...assistant, knowledgeBaseIds, mcpSourceIds };
 }
 
 export async function deleteAssistant(

@@ -1,59 +1,37 @@
-import { ChatWorkspace } from "@/components/chat/chat-workspace";
-import { currentUser } from "@clerk/nextjs/server";
-import { FEATURED_MODELS } from "@/lib/models";
-import { isClerkConfigured } from "@/server/auth/config";
-import { getRequestIdentity } from "@/server/auth/session";
-import { isAiGatewayConfigured } from "@/server/ai/gateway";
-import { listConversations } from "@/server/chat/store";
-import { getWorkspaceContext, isPersistenceConfigured } from "@/server/db/workspace";
-import { listEnabledChatModels } from "@/server/providers/store";
-import { listKnowledgeBases } from "@/server/knowledge/store";
-import { listMcpSources } from "@/server/mcp/store";
-import { listSkills } from "@/server/skills/store";
+import { MarketingNavbar } from "@/components/marketing/navbar";
+import { MarketingHero } from "@/components/marketing/hero";
+import { InteractiveWorkspacePreview } from "@/components/marketing/interactive-preview";
+import { FeaturesSection } from "@/components/marketing/features-section";
+import { ArchitectureSection } from "@/components/marketing/architecture-section";
+import { PricingSection } from "@/components/marketing/pricing-section";
+import { UseCasesSection } from "@/components/marketing/use-cases-section";
+import { FaqSection } from "@/components/marketing/faq-section";
+import { MarketingCtaSection } from "@/components/marketing/cta-section";
+import { MarketingFooter } from "@/components/marketing/footer";
 
-export default async function Home() {
-  const canPersist = isClerkConfigured() && isPersistenceConfigured();
-  const context = canPersist ? await getWorkspaceContext() : null;
-  const [identity, user] = isClerkConfigured()
-    ? await Promise.all([getRequestIdentity(), currentUser()])
-    : [null, null];
-  const [conversationList, workspaceModels, knowledgeBases, mcpSources, skills] = context
-    ? await Promise.all([
-        listConversations(context),
-        listEnabledChatModels(context),
-        listKnowledgeBases(context),
-        listMcpSources(context),
-        listSkills(context),
-      ])
-    : [[], [], [], [], []];
-
+export default function HomePage() {
   return (
-    <ChatWorkspace
-      models={workspaceModels.length > 0 ? workspaceModels : FEATURED_MODELS}
-      authEnabled={isClerkConfigured()}
-      gatewayEnabled={
-        workspaceModels.length > 0 ||
-        (isAiGatewayConfigured() &&
-          (!isClerkConfigured() || Boolean(identity)))
-      }
-      persistenceEnabled={Boolean(context)}
-      initialConversations={conversationList}
-      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || null}
-      initialKnowledgeBases={knowledgeBases}
-      initialMcpSources={mcpSources.map((source) => ({
-        id: source.id,
-        name: source.name,
-        transport: source.transport,
-        enabled: source.enabled,
-        toolCount: source.tools.length,
-      }))}
-      initialSkills={skills.map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        enabled: skill.enabled,
-        autoLoad: skill.autoLoad,
-      }))}
-    />
+    <div className="relative min-h-screen bg-[#07090c] text-zinc-100 selection:bg-[#b7f34a]/30 selection:text-white">
+      {/* Dynamic Background Noise/Grid */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(#ffffff08_1px,transparent_1px)] [background-size:24px_24px] opacity-60" />
+
+      {/* Global Navigation */}
+      <MarketingNavbar />
+
+      {/* Main Marketing Flow */}
+      <main className="relative">
+        <MarketingHero />
+        <InteractiveWorkspacePreview />
+        <FeaturesSection />
+        <ArchitectureSection />
+        <PricingSection />
+        <UseCasesSection />
+        <FaqSection />
+        <MarketingCtaSection />
+      </main>
+
+      {/* Enterprise Footer */}
+      <MarketingFooter />
+    </div>
   );
 }

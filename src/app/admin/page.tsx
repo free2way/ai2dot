@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { ProviderManager } from "@/components/admin/provider-manager";
-import { isClerkConfigured } from "@/server/auth/config";
+import { isAuthConfigured } from "@/server/auth/config";
 import {
   getAdminWorkspaceContext,
   isPersistenceConfigured,
@@ -13,9 +13,11 @@ import {
 import { listMcpSources } from "@/server/mcp/store";
 import { listSkills } from "@/server/skills/store";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
   const configuration = {
-    authReady: isClerkConfigured(),
+    authReady: isAuthConfigured(),
     databaseReady: isPersistenceConfigured(),
     encryptionReady: Boolean(process.env.PROVIDER_SECRET_ENCRYPTION_KEY),
   };

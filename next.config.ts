@@ -1,7 +1,20 @@
 import type { NextConfig } from "next";
 
+const behindReverseProxy = process.env.AI2DOT_REVERSE_PROXY === "true";
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  compress: !behindReverseProxy,
+  deploymentId: process.env.DEPLOYMENT_VERSION || undefined,
+  output: "standalone",
+  poweredByHeader: false,
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "X-Accel-Buffering", value: "no" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -2,7 +2,12 @@ import { notFound, redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
 import { FEATURED_MODELS } from "@/lib/models";
-import { isClerkConfigured } from "@/server/auth/config";
+import {
+  getAuthMode,
+  isAuthConfigured,
+  isClerkConfigured,
+} from "@/server/auth/config";
+import { getRequestIdentity } from "@/server/auth/session";
 import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import { getAssistant } from "@/server/assistants/store";
 import {
@@ -20,6 +25,8 @@ import { listKnowledgeBases } from "@/server/knowledge/store";
 import { listMcpSources } from "@/server/mcp/store";
 import { listSkills } from "@/server/skills/store";
 
+export const dynamic = "force-dynamic";
+
 export default async function ConversationPage({
   params,
   searchParams,
@@ -27,10 +34,11 @@ export default async function ConversationPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ branch?: string }>;
 }) {
-  if (!isClerkConfigured() || !isPersistenceConfigured()) redirect("/");
+  if (!isAuthConfigured() || !isPersistenceConfigured()) redirect("/");
 
   const context = await getWorkspaceContext();
   if (!context) redirect("/sign-in");
+  const requestIdentity = await getRequestIdentity();
 
   const { id } = await params;
   const [conversation, branches] = await Promise.all([
@@ -52,7 +60,7 @@ export default async function ConversationPage({
     conversation.assistantId
       ? getAssistant(context, conversation.assistantId)
       : Promise.resolve(null),
-    currentUser(),
+    isClerkConfigured() ? currentUser() : Promise.resolve(null),
     listMcpSources(context),
     listSkills(context),
   ]);
@@ -81,6 +89,8 @@ export default async function ConversationPage({
     <ChatWorkspace
       models={workspaceModels.length > 0 ? workspaceModels : FEATURED_MODELS}
       authEnabled
+      authProvider={getAuthMode()}
+      signedIn
       gatewayEnabled={workspaceModels.length > 0 || isAiGatewayConfigured()}
       persistenceEnabled
       initialConversationId={id}
@@ -89,9 +99,10 @@ export default async function ConversationPage({
       initialContextCompacted={activeBranch.hasContextSummary}
       initialMessages={initialMessages}
       initialConversations={conversationList}
-      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || null}
+      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || requestIdentity?.displayName || null}
       initialModelId={assistant?.defaultModelKey ?? undefined}
       initialKnowledgeBaseIds={assistant?.knowledgeBaseIds ?? []}
+      initialMcpSourceIds={assistant?.mcpSourceIds ?? []}
       initialAssistant={assistant ? {
         name: assistant.name,
         description: assistant.description,

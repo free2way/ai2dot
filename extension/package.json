@@ -1,0 +1,54 @@
+{
+  "name": "ai2dot-web-clipper",
+  "displayName": "ai2dot Web Clipper",
+  "version": "0.1.0",
+  "description": "使用 ai2dot 分析当前页面并保存到知识库。",
+  "author": "ai2dot",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@clerk/chrome-extension": "3.1.85",
+    "@mozilla/readability": "0.6.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "turndown": "7.2.4",
+    "turndown-plugin-gfm": "1.0.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.1.12",
+    "@types/node": "20.19.24",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/turndown": "5.0.5",
+    "jsdom": "27.1.0",
+    "plasmo": "0.90.5",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "manifest": {
+    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtvFGUdK7eDNeYuaIDSoFsWDFOxh7noSHab/u0lU1zdfXavq2EUaozgMHoyiOkWCHixQDQNZhDbPqBMsNTahrdZLcqsb1EIRpGNFZ14ZceJNRiJKTpC02t8M9H8dnDkKaI9/jcX2PzKUOtvDntOhftyX8eYTDS7CaxdKDpV9oeKQ84OLxlLCTBwve/E/Xib0ztkeR+CTaSDbzys6PY0+cbXw/Ruz4Eep8jNyLgit41QhBGfR/hp09wWZTgPP0UYULP7mBzfDgy4zWMuFC95eqBmIC8uEuFnJfiqBROdNou3Y+wr8D0XKtEtR1IsX9sSz7mA2zdZ7gsZ7ShsoUBPo1dwIDAQAB",
+    "minimum_chrome_version": "116",
+    "permissions": [
+      "activeTab",
+      "cookies",
+      "scripting",
+      "sidePanel",
+      "storage"
+    ],
+    "host_permissions": [
+      "https://*.clerk.accounts.dev/*",
+      "https://ai.ai2dot.com/*"
+    ],
+    "action": {
+      "default_title": "使用 ai2dot 分析当前页面"
+    }
+  }
+}

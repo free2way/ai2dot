@@ -8,4 +8,5 @@ export const assistantInputSchema = z.object({
   welcomeMessage: z.string().trim().max(500).optional().default(""),
   defaultModelKey: z.string().trim().max(120).optional().default(""),
   knowledgeBaseIds: z.array(z.string().uuid()).max(3).default([]),
+  mcpSourceIds: z.array(z.string().uuid()).max(10).default([]),
 });

@@ -1,18 +1,27 @@
 "use client";
 
 import {
+  AtSign,
+  BookOpenText,
   Check,
+  ExternalLink,
   Eye,
   EyeOff,
+  GitFork,
   Link2,
+  Mail,
   Pencil,
+  PlugZap,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
+  Telescope,
   Trash2,
   X,
 } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { MCP_PRESETS, type McpPreset } from "@/lib/mcp-presets";
 
 export type McpSourceSummary = {
   id: string;
@@ -50,6 +59,16 @@ const EMPTY_FORM: FormState = {
   enabled: true,
 };
 
+const PRESET_ICONS = {
+  context7: BookOpenText,
+  exa: Search,
+  github: GitFork,
+  gmail: Mail,
+  notion: BookOpenText,
+  tavily: Telescope,
+  x: AtSign,
+};
+
 export function McpSourceManager({
   infrastructureReady,
   initialSources = [],
@@ -57,6 +76,7 @@ export function McpSourceManager({
   const [sources, setSources] = useState(initialSources);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string>();
+  const [activePresetId, setActivePresetId] = useState<string>();
   const [formState, setFormState] = useState<FormState>(EMPTY_FORM);
   const [showSecret, setShowSecret] = useState(false);
   const [busyId, setBusyId] = useState<string>();
@@ -72,13 +92,31 @@ export function McpSourceManager({
   const openCreate = () => {
     if (!infrastructureReady) return;
     setEditingId(undefined);
+    setActivePresetId(undefined);
     setFormState(EMPTY_FORM);
+    setShowSecret(false);
+    setFormOpen(true);
+  };
+
+  const openPreset = (preset: McpPreset) => {
+    if (!infrastructureReady || !preset.available || !preset.url) return;
+    setEditingId(undefined);
+    setActivePresetId(preset.id);
+    setFormState({
+      name: preset.name,
+      description: preset.description,
+      transport: preset.transport,
+      url: preset.url,
+      secret: "",
+      enabled: true,
+    });
     setShowSecret(false);
     setFormOpen(true);
   };
 
   const openEdit = (source: McpSourceSummary) => {
     setEditingId(source.id);
+    setActivePresetId(undefined);
     setFormState({
       name: source.name,
       description: source.description ?? "",
@@ -111,6 +149,11 @@ export function McpSourceManager({
 
   const saveSource = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const preset = MCP_PRESETS.find((item) => item.id === activePresetId);
+    if (!editingId && preset?.auth === "bearer" && !formState.secret.trim()) {
+      setNotice(`请输入 ${preset.secretLabel ?? "API Key"}。`);
+      return;
+    }
     setBusyId("save");
     setNotice(undefined);
     try {
@@ -182,6 +225,25 @@ export function McpSourceManager({
         </div>
       </div>
       {!infrastructureReady && <p className="mcp-help">完成登录、数据库和密钥加密配置后，才能保存外部 MCP 凭据。</p>}
+      <div className="mcp-preset-section">
+        <div className="mcp-preset-heading"><div><PlugZap size={16} /><strong>快速连接</strong></div><small>选择模板，只填写自己的凭据</small></div>
+        <div className="mcp-preset-grid">
+          {MCP_PRESETS.map((preset) => {
+            const Icon = PRESET_ICONS[preset.id as keyof typeof PRESET_ICONS] ?? Link2;
+            return (
+              <article className="mcp-preset-card" data-available={preset.available} key={preset.id}>
+                <div className="mcp-preset-top"><span><Icon size={16} /></span><em>{preset.available ? preset.auth === "none" ? "免密钥" : "API Key" : "OAuth 待接入"}</em></div>
+                <div><strong>{preset.name}</strong>{preset.recommended && <small>推荐</small>}</div>
+                <p>{preset.description}</p>
+                <div className="mcp-preset-actions">
+                  <a href={preset.docsUrl} rel="noreferrer" target="_blank" title={`查看 ${preset.name} 文档`}><ExternalLink size={13} /></a>
+                  <button disabled={!infrastructureReady || !preset.available} onClick={() => openPreset(preset)} type="button">{preset.available ? "配置" : "需要 OAuth"}</button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
       {sources.length === 0 ? (
         <div className="mcp-empty"><Link2 size={22} /><strong>还没有外部 MCP 来源</strong><p>添加一个兼容 Streamable HTTP 或 SSE 的 MCP 地址，例如团队工具、搜索或自动化服务。</p></div>
       ) : (
@@ -210,7 +272,7 @@ export function McpSourceManager({
             <label>传输方式<select value={formState.transport} onChange={(event) => setFormState((state) => ({ ...state, transport: event.target.value as "http" | "sse" }))}><option value="http">Streamable HTTP（推荐）</option><option value="sse">SSE（兼容旧服务）</option></select></label>
             <label>服务器地址<span>必须使用 HTTPS，填写 MCP endpoint</span><input required type="url" value={formState.url} onChange={(event) => setFormState((state) => ({ ...state, url: event.target.value }))} placeholder="https://mcp.example.com/mcp" /></label>
             <label>描述（可选）<input maxLength={240} value={formState.description} onChange={(event) => setFormState((state) => ({ ...state, description: event.target.value }))} placeholder="这个来源可以做什么？" /></label>
-            <label>Bearer Token（可选）<div className="secret-field"><input value={formState.secret} onChange={(event) => setFormState((state) => ({ ...state, secret: event.target.value }))} type={showSecret ? "text" : "password"} autoComplete="new-password" placeholder={editingId ? "留空表示继续使用当前 Token" : "token-••••••••"} /><button type="button" onClick={() => setShowSecret((visible) => !visible)} aria-label={showSecret ? "隐藏密钥" : "显示密钥"}>{showSecret ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
+            <label>{MCP_PRESETS.find((item) => item.id === activePresetId)?.secretLabel ?? "Bearer Token（可选）"}<div className="secret-field"><input value={formState.secret} onChange={(event) => setFormState((state) => ({ ...state, secret: event.target.value }))} required={!editingId && MCP_PRESETS.find((item) => item.id === activePresetId)?.auth === "bearer"} type={showSecret ? "text" : "password"} autoComplete="new-password" placeholder={editingId ? "留空表示继续使用当前 Token" : MCP_PRESETS.find((item) => item.id === activePresetId)?.secretPlaceholder ?? "token-••••••••"} /><button type="button" onClick={() => setShowSecret((visible) => !visible)} aria-label={showSecret ? "隐藏密钥" : "显示密钥"}>{showSecret ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
             {editingId && <label className="provider-enabled"><input checked={formState.enabled} onChange={(event) => setFormState((state) => ({ ...state, enabled: event.target.checked }))} type="checkbox" /><span><strong>启用此来源</strong><small>启用后，聊天时会把同步到的工具提供给模型。</small></span></label>}
             <p className="secret-hint"><ShieldCheck size={14} /> Token 使用 AES-256-GCM 加密，仅在服务端连接 MCP 时解密。</p>
             <button className="admin-primary" disabled={busyId === "save"} type="submit">{busyId === "save" ? "正在保存…" : "保存并测试连接"}</button>

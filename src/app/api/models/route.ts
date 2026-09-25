@@ -1,5 +1,5 @@
 import { FEATURED_MODELS } from "@/lib/models";
-import { isClerkConfigured } from "@/server/auth/config";
+import { isAuthConfigured } from "@/server/auth/config";
 import {
   getWorkspaceContext,
   isPersistenceConfigured,
@@ -8,7 +8,7 @@ import { listEnabledChatModels } from "@/server/providers/store";
 
 export async function GET() {
   const context =
-    isClerkConfigured() && isPersistenceConfigured()
+    isAuthConfigured() && isPersistenceConfigured()
       ? await getWorkspaceContext()
       : null;
   const workspaceModels = context ? await listEnabledChatModels(context) : [];

@@ -1,11 +1,23 @@
 import "server-only";
 
-import { and, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import {
+  and,
+  cosineDistance,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import type {
   KnowledgeBaseSummary,
   KnowledgeDocumentSummary,
   KnowledgeSearchResult,
 } from "@/lib/knowledge";
+import { rerankHybridKnowledgeResults } from "@/lib/knowledge-retrieval";
 import { getDb } from "@/server/db";
 import {
   knowledgeBases,
@@ -13,6 +25,8 @@ import {
   knowledgeDocuments,
 } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
+import { enqueueKnowledgeEmbeddingJob } from "@/server/knowledge/embedding-jobs";
+import { embedKnowledgeQuery } from "@/server/knowledge/embeddings";
 
 const MAX_DOCUMENT_CHARACTERS = 500_000;
 const CHUNK_SIZE = 1_200;
@@ -80,12 +94,16 @@ export function scoreKnowledgeText(content: string, query: string) {
 }
 
 export function rankKnowledgeResults(
-  rows: Omit<KnowledgeSearchResult, "score">[],
+  rows: Omit<KnowledgeSearchResult, "retrievalMode" | "score">[],
   query: string,
   limit: number,
 ) {
   const ranked = rows
-    .map((row) => ({ ...row, score: scoreKnowledgeText(row.content, query) }))
+    .map((row) => ({
+      ...row,
+      score: scoreKnowledgeText(row.content, query),
+      retrievalMode: "keyword" as const,
+    }))
     .filter((row) => row.score > 0)
     .sort((left, right) => right.score - left.score);
   const selected: KnowledgeSearchResult[] = [];
@@ -119,7 +137,7 @@ export async function listKnowledgeBases(
 
   if (bases.length === 0) return [];
   const ids = bases.map((base) => base.id);
-  const [documentCounts, chunkCounts] = await Promise.all([
+  const [documentCounts, chunkCounts, semanticChunkCounts] = await Promise.all([
     db
       .select({
         knowledgeBaseId: knowledgeDocuments.knowledgeBaseId,
@@ -136,12 +154,23 @@ export async function listKnowledgeBases(
       .from(knowledgeChunks)
       .where(inArray(knowledgeChunks.knowledgeBaseId, ids))
       .groupBy(knowledgeChunks.knowledgeBaseId),
+    db
+      .select({
+        knowledgeBaseId: knowledgeChunks.knowledgeBaseId,
+        value: sql<number>`count(${knowledgeChunks.embedding})::int`,
+      })
+      .from(knowledgeChunks)
+      .where(inArray(knowledgeChunks.knowledgeBaseId, ids))
+      .groupBy(knowledgeChunks.knowledgeBaseId),
   ]);
   const documentsByBase = new Map(
     documentCounts.map((item) => [item.knowledgeBaseId, item.value]),
   );
   const chunksByBase = new Map(
     chunkCounts.map((item) => [item.knowledgeBaseId, item.value]),
+  );
+  const semanticChunksByBase = new Map(
+    semanticChunkCounts.map((item) => [item.knowledgeBaseId, item.value]),
   );
 
   return bases.map((base) => ({
@@ -150,6 +179,7 @@ export async function listKnowledgeBases(
     description: base.description ?? "",
     documentCount: documentsByBase.get(base.id) ?? 0,
     chunkCount: chunksByBase.get(base.id) ?? 0,
+    semanticChunkCount: semanticChunksByBase.get(base.id) ?? 0,
     updatedAt: base.updatedAt.toISOString(),
   }));
 }
@@ -180,6 +210,10 @@ export async function listKnowledgeDocuments(
       characterCount: knowledgeDocuments.characterCount,
       status: knowledgeDocuments.status,
       errorMessage: knowledgeDocuments.errorMessage,
+      embeddingStatus: knowledgeDocuments.embeddingStatus,
+      embeddingModel: knowledgeDocuments.embeddingModel,
+      embeddedChunkCount: knowledgeDocuments.embeddedChunkCount,
+      embeddingError: knowledgeDocuments.embeddingError,
       updatedAt: knowledgeDocuments.updatedAt,
       chunkCount: count(knowledgeChunks.id),
     })
@@ -331,6 +365,10 @@ export async function indexKnowledgeDocument(
         characterCount: input.content.length,
         status: "ready",
         errorMessage: null,
+        embeddingStatus: "pending",
+        embeddingModel: null,
+        embeddedChunkCount: 0,
+        embeddingError: null,
         updatedAt: new Date(),
       })
       .where(eq(knowledgeDocuments.id, input.documentId));
@@ -338,6 +376,10 @@ export async function indexKnowledgeDocument(
       .update(knowledgeBases)
       .set({ updatedAt: new Date() })
       .where(eq(knowledgeBases.id, input.knowledgeBaseId));
+    await enqueueKnowledgeEmbeddingJob(context, {
+      knowledgeBaseId: input.knowledgeBaseId,
+      documentId: input.documentId,
+    });
   } catch (error) {
     await db
       .update(knowledgeDocuments)
@@ -426,16 +468,21 @@ export async function searchKnowledge(
   if (knowledgeBaseIds.length === 0 || !query.trim()) return [];
   const uniqueIds = [...new Set(knowledgeBaseIds)].slice(0, 3);
   const terms = getKnowledgeSearchTerms(query).slice(0, 16);
-  if (terms.length === 0) return [];
-  const rows = await getDb()
+  const db = getDb();
+  const commonSelection = {
+    chunkId: knowledgeChunks.id,
+    documentId: knowledgeDocuments.id,
+    documentName: knowledgeDocuments.name,
+    knowledgeBaseId: knowledgeBases.id,
+    knowledgeBaseName: knowledgeBases.name,
+    mimeType: knowledgeDocuments.mimeType,
+    content: knowledgeChunks.content,
+  };
+  const keywordPromise = terms.length === 0
+    ? Promise.resolve([])
+    : db
     .select({
-      chunkId: knowledgeChunks.id,
-      documentId: knowledgeDocuments.id,
-      documentName: knowledgeDocuments.name,
-      knowledgeBaseId: knowledgeBases.id,
-      knowledgeBaseName: knowledgeBases.name,
-      mimeType: knowledgeDocuments.mimeType,
-      content: knowledgeChunks.content,
+      ...commonSelection,
     })
     .from(knowledgeChunks)
     .innerJoin(
@@ -454,7 +501,64 @@ export async function searchKnowledge(
         or(...terms.map((term) => ilike(knowledgeChunks.content, `%${term}%`))),
       ),
     )
-    .limit(1_600);
+    .limit(400);
+  const embeddingPromise = embedKnowledgeQuery(context.workspaceId, query).catch((error) => {
+    console.warn("[knowledge] query embedding unavailable", error);
+    return null;
+  });
+  const [keywordRows, queryEmbedding] = await Promise.all([
+    keywordPromise,
+    embeddingPromise,
+  ]);
+  const keywordCandidates = keywordRows
+    .map((row) => ({
+      ...row,
+      keywordScore: scoreKnowledgeText(row.content, query),
+    }))
+    .filter((row) => row.keywordScore > 0)
+    .sort((left, right) => right.keywordScore - left.keywordScore)
+    .slice(0, 40);
 
-  return rankKnowledgeResults(rows, query, limit);
+  if (!queryEmbedding) {
+    return rerankHybridKnowledgeResults(keywordCandidates, [], limit);
+  }
+
+  const similarity = sql<number>`1 - (${cosineDistance(
+    knowledgeChunks.embedding,
+    queryEmbedding.embedding,
+  )})`;
+  const semanticRows = await db
+    .select({ ...commonSelection, semanticScore: similarity })
+    .from(knowledgeChunks)
+    .innerJoin(
+      knowledgeDocuments,
+      eq(knowledgeDocuments.id, knowledgeChunks.documentId),
+    )
+    .innerJoin(
+      knowledgeBases,
+      eq(knowledgeBases.id, knowledgeChunks.knowledgeBaseId),
+    )
+    .where(
+      and(
+        eq(knowledgeBases.workspaceId, context.workspaceId),
+        eq(knowledgeDocuments.status, "ready"),
+        inArray(knowledgeBases.id, uniqueIds),
+        isNotNull(knowledgeChunks.embedding),
+        eq(knowledgeChunks.embeddingModel, queryEmbedding.modelId),
+      ),
+    )
+    .orderBy(desc(similarity))
+    .limit(40);
+  const semanticCandidates = semanticRows
+    .map((row) => ({
+      ...row,
+      semanticScore: Math.max(0, Math.min(1, Number(row.semanticScore))),
+    }))
+    .filter((row) => row.semanticScore >= 0.18);
+
+  return rerankHybridKnowledgeResults(
+    keywordCandidates,
+    semanticCandidates,
+    limit,
+  );
 }

@@ -38,7 +38,7 @@ export async function consumeChatRateLimit(
       target: [chatRateLimits.workspaceId, chatRateLimits.userId],
       set: {
         windowStart,
-        requestCount: sql`case when ${chatRateLimits.windowStart} = ${windowStart} then ${chatRateLimits.requestCount} + 1 else 1 end`,
+        requestCount: sql`case when ${chatRateLimits.windowStart} = ${windowStart.toISOString()} then ${chatRateLimits.requestCount} + 1 else 1 end`,
         updatedAt: new Date(now),
       },
     })

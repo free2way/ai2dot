@@ -21,6 +21,7 @@ import {
   GitBranch,
   History,
   Link2,
+  LogOut,
   Menu,
   MessageSquareText,
   MoreHorizontal,
@@ -30,9 +31,11 @@ import {
   RotateCcw,
   Search,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Square,
   Trash2,
+  Wrench,
   X,
   Zap,
 } from "lucide-react";
@@ -46,7 +49,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { DefaultChatTransport, type UIMessage } from "ai";
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithApprovalResponses,
+  type UIMessage,
+} from "ai";
 import { BrandMark } from "@/components/brand-mark";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { getKnowledgeSourceParts } from "@/lib/chat-sources";
@@ -94,6 +101,8 @@ const CHAT_TRANSPORT = new DefaultChatTransport({ api: "/api/chat" });
 type ChatWorkspaceProps = {
   models: ModelCatalogEntry[];
   authEnabled: boolean;
+  authProvider?: "clerk" | "local" | "disabled";
+  signedIn?: boolean;
   gatewayEnabled: boolean;
   persistenceEnabled?: boolean;
   initialConversationId?: string;
@@ -104,6 +113,7 @@ type ChatWorkspaceProps = {
   initialContextCompacted?: boolean;
   initialModelId?: string;
   initialKnowledgeBaseIds?: string[];
+  initialMcpSourceIds?: string[];
   initialAssistant?: { name: string; description?: string | null };
   initialUserName?: string | null;
   initialKnowledgeBases?: KnowledgeBaseSummary[];
@@ -152,9 +162,97 @@ function MessageKnowledgeSources({ message }: { message: UIMessage }) {
   );
 }
 
+type ToolMessagePart = {
+  type: string;
+  toolName?: string;
+  toolCallId: string;
+  state: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+  approval?: {
+    id: string;
+    approved?: boolean;
+    reason?: string;
+    isAutomatic?: boolean;
+  };
+};
+
+function getToolMessagePart(
+  part: UIMessage["parts"][number],
+): ToolMessagePart | null {
+  if (part.type !== "dynamic-tool" && !part.type.startsWith("tool-")) return null;
+  return part as unknown as ToolMessagePart;
+}
+
+function formatToolValue(value: unknown) {
+  if (value === undefined) return "";
+  try {
+    return JSON.stringify(value, null, 2).slice(0, 2_000);
+  } catch {
+    return String(value).slice(0, 2_000);
+  }
+}
+
+function ToolActivity({
+  part,
+  onApproval,
+}: {
+  part: ToolMessagePart;
+  onApproval: (approvalId: string, approved: boolean) => void;
+}) {
+  const toolName = part.toolName ?? part.type.slice("tool-".length);
+  const approval = part.approval;
+  const waitingForUser =
+    part.state === "approval-requested" && !approval?.isAutomatic;
+  const status = waitingForUser
+    ? "等待确认"
+    : part.state === "output-available"
+      ? "已完成"
+      : part.state === "output-error"
+        ? "执行失败"
+        : part.state === "output-denied" ||
+            (part.state === "approval-responded" && approval?.approved === false)
+          ? "已拒绝"
+          : "处理中";
+
+  return (
+    <div className="tool-activity">
+      <div className="tool-activity-head">
+        <span><Wrench size={14} /><strong>{toolName}</strong></span>
+        <small data-state={part.state}>{status}</small>
+      </div>
+      {part.input !== undefined && (
+        <details>
+          <summary>查看工具参数</summary>
+          <pre>{formatToolValue(part.input)}</pre>
+        </details>
+      )}
+      {waitingForUser && approval && (
+        <div className="tool-approval-actions">
+          <p><ShieldCheck size={15} />此工具可能读取或修改外部数据，确认后才会执行。</p>
+          <div>
+            <button onClick={() => onApproval(approval.id, false)} type="button"><X size={14} />拒绝</button>
+            <button className="is-approve" onClick={() => onApproval(approval.id, true)} type="button"><Check size={14} />允许执行</button>
+          </div>
+        </div>
+      )}
+      {part.state === "output-error" && <p className="tool-error">{part.errorText}</p>}
+      {part.state === "output-available" && part.output !== undefined && (
+        <details>
+          <summary>查看执行结果</summary>
+          <pre>{formatToolValue(part.output)}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 export function ChatWorkspace({
   models,
   authEnabled,
+  authProvider = "disabled",
+  signedIn = false,
   gatewayEnabled,
   persistenceEnabled = false,
   initialConversationId,
@@ -165,6 +263,7 @@ export function ChatWorkspace({
   initialContextCompacted = false,
   initialModelId,
   initialKnowledgeBaseIds = [],
+  initialMcpSourceIds = [],
   initialAssistant,
   initialUserName,
   initialKnowledgeBases = [],
@@ -199,6 +298,9 @@ export function ChatWorkspace({
   const [selectedKnowledgeBaseIds, setSelectedKnowledgeBaseIds] = useState<string[]>(
     initialKnowledgeBaseIds.slice(0, 3),
   );
+  const [selectedMcpSourceIds, setSelectedMcpSourceIds] = useState<string[]>(
+    initialMcpSourceIds.slice(0, 10),
+  );
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [contextCompacted, setContextCompacted] = useState(
     initialContextCompacted,
@@ -221,6 +323,7 @@ export function ChatWorkspace({
     status,
     stop,
     regenerate,
+    addToolApprovalResponse,
     setMessages,
     error,
     clearError,
@@ -229,6 +332,7 @@ export function ChatWorkspace({
     messages: initialMessages && initialMessages.length > 0 ? initialMessages : welcomeMessages,
     transport: CHAT_TRANSPORT,
     throttle: 24,
+    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   });
 
   const selectedModel = models.find((model) => model.id === selectedModelId) ?? models[0];
@@ -378,6 +482,27 @@ export function ChatWorkspace({
     });
   };
 
+  const toggleMcpSource = (sourceId: string) => {
+    if (initialAssistant) return;
+    setSelectedMcpSourceIds((current) =>
+      current.includes(sourceId)
+        ? current.filter((id) => id !== sourceId)
+        : [...current, sourceId].slice(-10),
+    );
+  };
+
+  const approvalRequestOptions = () => ({
+    body: {
+      modelId: selectedModelId,
+      knowledgeBaseIds: selectedKnowledgeBaseIds,
+      mcpSourceIds: selectedMcpSourceIds,
+      conversationId: activeConversationId,
+      branchId: activeBranchId,
+      idempotencyKey: crypto.randomUUID(),
+      reasoning: useDeepThinking ? "high" : "provider-default",
+    },
+  });
+
   useEffect(() => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
@@ -468,6 +593,7 @@ export function ChatWorkspace({
           body: {
             modelId: selectedModelId,
             knowledgeBaseIds: selectedKnowledgeBaseIds,
+            mcpSourceIds: selectedMcpSourceIds,
             conversationId,
             branchId,
             idempotencyKey: crypto.randomUUID(),
@@ -579,6 +705,7 @@ export function ChatWorkspace({
         body: {
           modelId: selectedModelId,
           knowledgeBaseIds: selectedKnowledgeBaseIds,
+          mcpSourceIds: selectedMcpSourceIds,
           reasoning: useDeepThinking ? "high" : "provider-default",
         },
       });
@@ -625,6 +752,7 @@ export function ChatWorkspace({
         body: {
           modelId: selectedModelId,
           knowledgeBaseIds: selectedKnowledgeBaseIds,
+          mcpSourceIds: selectedMcpSourceIds,
           conversationId: activeConversationId,
           branchId: payload.branch.id,
           idempotencyKey: crypto.randomUUID(),
@@ -865,7 +993,27 @@ export function ChatWorkspace({
             </div>
             <LanguageSwitcher />
             <button className="icon-button inspector-toggle" onClick={() => setInspectorOpen(true)} aria-label={t("打开会话设置")}><PanelRight size={18} /></button>
-            {authEnabled ? <Show when="signed-in" fallback={<Link className="sign-in-link" href="/sign-in">{t("登录")}</Link>}><UserButton /></Show> : <Link className="sign-in-link" href="/sign-in">{t("登录")}</Link>}
+            {authProvider === "clerk" ? (
+              <Show
+                when="signed-in"
+                fallback={<Link className="sign-in-link" href="/sign-in">{t("登录")}</Link>}
+              >
+                <UserButton />
+              </Show>
+            ) : signedIn ? (
+              <form action="/api/auth/sign-out" method="post">
+                <button
+                  aria-label={t("退出登录")}
+                  className="icon-button"
+                  title={t("退出登录")}
+                  type="submit"
+                >
+                  <LogOut size={17} />
+                </button>
+              </form>
+            ) : (
+              <Link className="sign-in-link" href="/sign-in">{t("登录")}</Link>
+            )}
           </div>
         </header>
 
@@ -887,7 +1035,26 @@ export function ChatWorkspace({
                 <div className="message-body">
                   <div className="message-meta"><strong>{message.role === "assistant" ? assistantName : t("你")}</strong><span>{message.role === "assistant" ? selectedModel?.name : t("第 {{count}} 轮", { count: turnNumbers.get(message.id) ?? 1 })}</span></div>
                   <div className="message-content">
-                    {message.parts.map((part, partIndex) => part.type === "text" ? <MarkdownContent key={`${message.id}-${partIndex}`}>{part.text}</MarkdownContent> : null)}
+                    {message.parts.map((part, partIndex) => {
+                      if (part.type === "text") {
+                        return <MarkdownContent key={`${message.id}-${partIndex}`}>{part.text}</MarkdownContent>;
+                      }
+                      const toolPart = getToolMessagePart(part);
+                      if (!toolPart) return null;
+                      return (
+                        <ToolActivity
+                          key={`${message.id}-${partIndex}`}
+                          part={toolPart}
+                          onApproval={(approvalId, approved) => {
+                            void addToolApprovalResponse({
+                              id: approvalId,
+                              approved,
+                              options: approvalRequestOptions(),
+                            });
+                          }}
+                        />
+                      );
+                    })}
                     {isBusy && messageIndex === messages.length - 1 && message.role === "assistant" && <span className="stream-caret" />}
                   </div>
                   <MessageKnowledgeSources message={message} />
@@ -977,16 +1144,28 @@ export function ChatWorkspace({
         )}
         {persistenceEnabled && (
           <section className="inspector-section">
-            <div className="section-title"><span>{t("外部 MCP")}</span><small>{initialMcpSources.filter((source) => source.enabled).length}</small></div>
+            <div className="section-title"><span>{t("外部 MCP")}</span><small>{selectedMcpSourceIds.length} / {initialMcpSources.filter((source) => source.enabled).length}</small></div>
             {initialMcpSources.filter((source) => source.enabled).length > 0 ? (
               <div className="mcp-inspector-list">
                 {initialMcpSources.filter((source) => source.enabled).map((source) => (
-                  <div key={source.id}><Link2 size={14} /><span><strong>{source.name}</strong><small>{source.transport.toUpperCase()} · {source.toolCount} 个工具</small></span></div>
+                  <button
+                    aria-pressed={selectedMcpSourceIds.includes(source.id)}
+                    data-active={selectedMcpSourceIds.includes(source.id)}
+                    disabled={Boolean(initialAssistant)}
+                    key={source.id}
+                    onClick={() => toggleMcpSource(source.id)}
+                    type="button"
+                  >
+                    <Link2 size={14} />
+                    <span><strong>{source.name}</strong><small>{source.transport.toUpperCase()} · {source.toolCount} 个工具</small></span>
+                    {selectedMcpSourceIds.includes(source.id) && <Check size={14} />}
+                  </button>
                 ))}
               </div>
             ) : (
               <p className="branch-help">{t("还没有启用的外部 MCP。可在模型管理中添加。")}</p>
             )}
+            <p className="branch-help">{initialAssistant ? t("MCP 白名单由当前助手配置锁定。") : t("只有明确选中的 MCP 来源会提供给模型。")}</p>
             <Link className="knowledge-manage-link" href="/admin#mcp-sources">{t("管理 MCP 来源")}</Link>
           </section>
         )}

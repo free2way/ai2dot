@@ -41,6 +41,12 @@ describe("fingerprintGenerationRequest", () => {
     expect(fingerprintGenerationRequest(request)).not.toBe(
       fingerprintGenerationRequest({
         ...request,
+        mcpSourceIds: ["mcp-source"],
+      }),
+    );
+    expect(fingerprintGenerationRequest(request)).not.toBe(
+      fingerprintGenerationRequest({
+        ...request,
         reasoning: "high",
       }),
     );
