@@ -1,123 +1,183 @@
-# ai2dot
+<div align="center">
+  <img src="./extension/assets/icon.svg" width="92" height="92" alt="ai2dot logo" />
+  <h1>ai2dot</h1>
+  <p><strong>A deployable AI workspace for conversations, agents, knowledge, research, and operations.</strong></p>
+  <p>Run it on your own Docker infrastructure or ship the same application on Vercel and Neon.</p>
 
-一个面向个人与小团队的多租户 AI 聚合工作台。当前版本具备响应式 Chat UI、AI SDK 流式协议、多模型切换、本地或 Clerk 登录、PostgreSQL 持久化、供应商后台、Generation 可靠性记录、非覆盖式对话分支、知识库检索、指令型 Skill 以及无密钥演示模式。
+  <p>
+    <a href="https://ai2note.com"><strong>Product Site</strong></a> ·
+    <a href="https://ai.ai2dot.com"><strong>Cloud App</strong></a> ·
+    <a href="./docs/docker-linux-deployment.zh-CN.md"><strong>Deployment Guide</strong></a> ·
+    <a href="./README.zh-CN.md"><strong>简体中文</strong></a>
+  </p>
 
-## 本地启动
+  <p>
+    <img alt="CI" src="https://github.com/free2way/ai2dot/actions/workflows/ci.yml/badge.svg" />
+    <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs" />
+    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" />
+    <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white" />
+    <img alt="Docker" src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" />
+    <img alt="Vercel" src="https://img.shields.io/badge/Vercel-ready-000000?logo=vercel" />
+  </p>
+</div>
+
+---
+
+## Product Overview
+
+ai2dot turns fragmented AI tools into one governed workspace. Teams can connect their own model providers, build reusable assistants, ground conversations in private knowledge, run approved MCP tools, turn research sources into structured artifacts, and monitor the platform from an independent administration console.
+
+The application is provider-neutral and deployment-neutral by design. The same domain model, Drizzle migrations, authorization boundaries, generation ledger, and retrieval engine run in both environments:
+
+- **Self-hosted:** Docker Compose, Next.js standalone, Nginx, PostgreSQL + pgvector, and an optional Cloudflare Tunnel.
+- **Cloud:** Vercel Functions, Vercel Cron, Clerk, and Neon PostgreSQL + pgvector.
+
+## What Is Included
+
+| Surface | Production capability |
+| --- | --- |
+| **AI Workspace** | Streaming chat, model switching, deep reasoning controls, persistent conversations, rolling context summaries, and non-destructive branches. |
+| **Assistants** | Reusable system instructions with a selected model, knowledge bases, and an explicit MCP source allowlist. |
+| **Agentic Tools** | Multi-step MCP execution with step/time budgets, automatic approval for read-only tools, human approval for write or unknown-risk tools, and durable audit records. |
+| **Knowledge** | PDF, DOCX, TXT, Markdown, CSV, and JSON ingestion with PostgreSQL full-text/trigram candidates, pgvector semantic candidates, RRF fusion, and citations. |
+| **Notebook Studio** | Research spaces, files and pasted sources, YouTube/Bilibili transcript sources, source search, editable artifacts, and one-click publication to the knowledge base. |
+| **Skills** | Workspace-scoped `SKILL.md` instruction packages with metadata parsing, relevance matching, versioning, fingerprints, and MCP dependency hints. |
+| **Web Clipper** | Chrome Manifest V3 side panel that extracts the current page, generates Markdown with a workspace model, and saves it to a selected knowledge base. |
+| **Operations** | Provider health, usage, token and cost telemetry, generation replay, PostgreSQL rate limiting, background embedding jobs, and structured logs. |
+| **Platform Console** | Separate local administrator identity, user status controls, workspace inventory, storage and usage views, and administrative audit history. |
+
+## Reference Architecture
+
+<p align="center">
+  <img src="./docs/assets/ai2dot-reference-architecture.svg" alt="ai2dot reference architecture" width="100%" />
+</p>
+
+The control plane is intentionally stateless between requests. PostgreSQL owns authorization-relevant state, idempotency, leases, job progress, tool audit events, and external bindings. Docker may add process-local caches for performance, but correctness never depends on them; Vercel can therefore execute the same workflows across cold starts and concurrent functions.
+
+## Core Engineering Principles
+
+### Provider ownership without lock-in
+
+Connect OpenAI, OpenRouter, DeepSeek, ZenMux, Google Gemini, or any compatible endpoint. Provider credentials are encrypted with AES-256-GCM before they are stored and are never returned to the browser. Vercel AI Gateway remains optional.
+
+### Tool use with explicit boundaries
+
+An assistant can only see MCP sources assigned to it. Ordinary chats require users to select a source explicitly. Read-only tools can run automatically; write, destructive, and unknown-risk operations require human approval. Requests, approvals, executions, and outcomes are recorded in PostgreSQL.
+
+### Retrieval that survives provider outages
+
+Knowledge search combines `pg_trgm` keyword recall with pgvector HNSW semantic recall and reciprocal-rank fusion. Embeddings can use a workspace-owned OpenAI-compatible provider. If embedding generation is unavailable, search degrades to keyword retrieval instead of taking the workspace offline.
+
+### Durable AI operations
+
+Every persistent generation has a UUID idempotency key, a SHA-256 request fingerprint, and an explicit lifecycle. Completed responses can be replayed without a second upstream charge. Embedding work uses PostgreSQL leases, retries, and idempotent updates so interrupted functions or containers can resume safely.
+
+## Notebook Studio
+
+Notebook Studio connects research and the knowledge base in one workflow:
+
+1. Create a research space linked to its own knowledge base.
+2. Add documents, pasted text, or a YouTube/Bilibili URL with a transcript or subtitle file.
+3. Search all sources with the same hybrid retrieval engine used by chat.
+4. Generate a summary, FAQ, timeline, study guide, or mind map with a selected workspace model.
+5. Review and edit the Markdown artifact.
+6. Publish the result back to the knowledge base for future retrieval.
+
+Gemini Enterprise Notebook is designed as an **optional external provider**. The repository currently includes provider configuration and readiness checks; production OAuth, notebook/source synchronization, and report import are specified in the integration document and remain behind a feature flag. ai2dot's native Notebook Studio continues to work without Google services.
+
+See [Gemini Enterprise Notebook integration design](./docs/google-notebook-enterprise-integration.zh-CN.md).
+
+## Security Model
+
+- Workspace-level authorization on persistent resources and APIs.
+- Local signed HttpOnly sessions or Clerk authentication.
+- Separate platform-admin identities and sessions.
+- AES-256-GCM encryption for model and MCP credentials.
+- HTTPS-only external MCP endpoints with DNS/IP validation and private-network blocking.
+- Human approval for mutating or unclassified MCP tools.
+- Append-oriented generation records and tool audit trails.
+- PostgreSQL-backed rate limiting across multiple application instances.
+- Non-root production containers; PostgreSQL is not published to the host by default.
+
+Security features reduce operational risk but do not replace an organization-specific threat model, secret rotation policy, network policy, or compliance review.
+
+## Quick Start
+
+### Local development
+
+Requirements: Node.js 20.9+ and npm.
 
 ```bash
+git clone https://github.com/free2way/ai2dot.git
+cd ai2dot
 npm install
 cp .env.example .env.local
 npm run dev
 ```
 
-打开 `http://localhost:3000`。默认使用演示流；登录后可在 `/admin` 添加自己的 OpenAI-compatible 模型供应商和 API Key。Vercel AI Gateway 默认关闭，只有显式配置 `AI_GATEWAY_API_KEY`，或同时设置 `AI2DOT_ENABLE_AI_GATEWAY=true` 与 OIDC 时才会启用。
+Open `http://localhost:3000`. Without authentication or a database, ai2dot starts in a local demonstration mode. Configure authentication, PostgreSQL, and a model provider to enable persistent workspaces.
 
-## Docker 运行与 Linux 部署
-
-项目使用 Next.js standalone 输出构建精简生产镜像，容器以非 root 用户运行。Compose 默认启动 PostgreSQL、应用和 Nginx，并把数据库数据保存在命名 volume `ai2dot_postgres-data` 中。
+### Docker deployment
 
 ```bash
-# 填写数据库密码、本地管理员账号和会话密钥。Compose 自动读取 .env。
 cp .env.example .env
 
-# 生成本地管理员密码哈希并填入 AI2DOT_LOCAL_AUTH_PASSWORD_HASH
-npm run auth:hash-password -- 'your-strong-password'
+# Add the generated scrypt hash to AI2DOT_LOCAL_AUTH_PASSWORD_HASH.
+npm run auth:hash-password -- 'replace-with-a-strong-password'
 
-# 首次启动数据库并执行 schema migration
 docker compose up -d postgres
 docker compose --profile tools run --rm migrate
-
-# 构建并启动应用与 Nginx，默认监听宿主机 3000 端口
 docker compose up -d --build app proxy
-
-# 查看容器状态和日志
 docker compose ps
-docker compose logs -f app proxy
 ```
 
-数据库 schema 更新后显式执行迁移：
+The production image uses Next.js standalone output and runs as a non-root user. Nginx provides compression, connection reuse, immutable static-asset caching, and unbuffered streaming responses. PostgreSQL data is stored in the `ai2dot_postgres-data` volume.
 
-```bash
-docker compose --profile tools run --rm migrate
+For host preparation, backups, Cloudflare Tunnel, Clerk, health checks, rollback, and restore procedures, use the [Docker + Linux deployment guide](./docs/docker-linux-deployment.zh-CN.md).
+
+### Vercel deployment
+
+1. Create a Neon PostgreSQL database with `pgvector` and `pg_trgm`.
+2. Configure pooled `DATABASE_URL` and unpooled `DATABASE_URL_UNPOOLED`.
+3. Add Clerk or the required authentication variables.
+4. Add `PROVIDER_SECRET_ENCRYPTION_KEY` and model-provider configuration.
+5. Deploy with `npm run vercel-build`; migrations run before the Next.js build.
+6. Configure the embedding recovery cron endpoint with `CRON_SECRET`.
+
+The full runtime comparison is documented in [Docker and Vercel dual-runtime architecture](./docs/dual-runtime-architecture.zh-CN.md).
+
+## Configuration
+
+| Area | Important variables |
+| --- | --- |
+| Database | `DATABASE_URL`, `DATABASE_URL_UNPOOLED`, `DATABASE_POOL_MAX` |
+| Authentication | `AI2DOT_AUTH_MODE`, `AI2DOT_SESSION_SECRET`, Clerk keys |
+| Local login | `AI2DOT_LOCAL_AUTH_EMAIL`, `AI2DOT_LOCAL_AUTH_PASSWORD_HASH` |
+| Credential vault | `PROVIDER_SECRET_ENCRYPTION_KEY` |
+| AI Gateway | `AI_GATEWAY_API_KEY`, `AI2DOT_ENABLE_AI_GATEWAY` |
+| Embeddings | `AI2DOT_EMBEDDING_*` |
+| Agent controls | `AI2DOT_TOOL_APPROVAL_SECRET`, MCP source configuration |
+| Background work | `CRON_SECRET`, embedding batch and lease settings |
+| Docker | `AI2DOT_PORT`, `AI2DOT_NODE_MEMORY_MB`, PostgreSQL variables |
+
+See [`.env.example`](./.env.example) for the complete, annotated list. Never commit `.env`, OAuth secrets, database credentials, tunnel tokens, or provider API keys.
+
+## Repository Map
+
+```text
+src/app/                 Next.js App Router pages and Route Handlers
+src/components/          Workspace, admin, knowledge, notebook, and marketing UI
+src/server/              Auth, database, providers, MCP, knowledge, and operations
+src/lib/                 Shared domain types, policies, parsing, and presentation data
+drizzle/                 Versioned PostgreSQL migrations
+extension/               Chrome Manifest V3 web clipper
+deploy/                  Nginx and deployment assets
+docs/                    Architecture, deployment, extension, and database guides
+compose.yaml             Self-hosted production topology
+Dockerfile               Multi-stage Next.js standalone image
 ```
 
-Linux 主机需安装 Docker Engine 与 Docker Compose 插件。将项目目录同步到主机后，在项目目录中放置不纳入版本控制的 `.env`，再执行上述迁移及启动命令。通过 `AI2DOT_PORT` 可调整宿主机端口，例如 `AI2DOT_PORT=8080`。
-
-生产入口由 Nginx 提供，启用连接复用、gzip 和 Next.js 静态资源缓存；聊天与 React 流式响应关闭代理缓冲。镜像构建启用 npm/Next BuildKit 缓存，重复发布只重建变化的层。`AI2DOT_NODE_MEMORY_MB` 控制 Node.js 最大堆内存，默认 768 MB；小型主机可降到 384–512，大型文档处理或高并发场景可提高。Clerk 的 `NEXT_PUBLIC_*` 变量会在镜像构建时写入前端资源，修改后必须重新构建镜像。
-
-本地认证使用 scrypt 密码哈希和 HMAC 签名的 HttpOnly Cookie，默认会话有效期为 7 天。公网 HTTPS 部署应设置 `AI2DOT_COOKIE_SECURE=true`。如需改回 Clerk，设置 `AI2DOT_AUTH_MODE=clerk` 并填写 Clerk 两项 key。
-
-创建一次 PostgreSQL 压缩备份：
-
-```bash
-mkdir -p backups
-docker compose --profile tools run --rm backup
-```
-
-## 持久化会话与登录
-
-同时配置认证和 PostgreSQL 后，应用会自动为首次登录用户建立个人工作区。会话在模型调用前以只追加方式写入数据库，完整回答与 token 用量在流结束时更新，每个会话都有可恢复地址 `/chat/[id]`。
-
-每次云端生成都有 UUID 幂等键、SHA-256 请求指纹和 `pending → streaming → completed/failed/stopped` 状态。相同请求重复到达时不会再次扣费；已完成结果会直接回放。对回答执行“分支重试”会保留原回答，复制问题以前的上下文到新分支，并可在右侧会话设置中切换。
-
-```bash
-# 写入 .env.local 后创建数据库表
-npm run db:migrate
-```
-
-未配置认证或 PostgreSQL 时，应用保持可运行，并把当前演示会话保存在浏览器 localStorage。
-
-## 模型供应商后台
-
-访问 `/admin` 管理供应商连接。内置 OpenAI、OpenRouter、DeepSeek、ZenMux、Google Gemini 与自定义 OpenAI-compatible 快捷模板；API Key 使用 AES-256-GCM 加密后入库。
-
-生成加密密钥：
-
-```bash
-openssl rand -base64 32
-```
-
-配置 `PROVIDER_SECRET_ENCRYPTION_KEY` 后即可添加连接并在线刷新模型目录。后台页面和 API 都会执行账户及工作区管理员权限检查，并显示最近 30 天用量、token、预估费用及供应商健康状态。
-
-## 外部 MCP 来源
-
-访问 `/admin#mcp-sources` 或在模型管理页向下滚动到“外部 MCP 来源”，即可添加远程 MCP 服务。当前支持 Streamable HTTP（推荐）和 SSE 两种传输方式，可选填写 Bearer Token；地址必须使用 HTTPS，并会阻止解析到内网的主机。
-
-保存后 AI2Dot 会测试连接并同步工具清单。MCP 来源必须在助手中加入白名单，或在普通会话的设置面板中由用户明确选择，才会提供给模型。模型最多连续执行 5 个工具步骤；写入、删除和风险未知的工具会在执行前请求用户确认。单个来源不可用时不会阻断普通模型回答。MCP 凭据与模型供应商密钥使用同一套 AES-256-GCM 加密策略。
-
-新增 MCP 数据表后，在本地或部署环境执行一次迁移：
-
-```bash
-npm run db:migrate
-```
-
-## 外部 Skill
-
-访问 `/admin#skills` 管理工作区 Skill。第一阶段支持粘贴或从 `raw.githubusercontent.com` / `gist.githubusercontent.com` 导入 `SKILL.md` 指令包，解析 `name`、`description`、`version`、`keywords` 和 `required_mcp` 等简单 frontmatter；启用后，聊天会按当前问题相关性最多加载 3 个 Skill。Skill 只提供受限的工作流程上下文，不会执行其中的脚本、命令或隐藏指令，也不会赋予新的 MCP 权限。
-
-Skill 与 MCP 互补：Skill 描述“如何完成工作”，MCP 提供“可以访问的工具和数据”。当前 Skill 内容按工作区隔离保存，支持启用/停用、自动匹配、版本和来源记录，并保存 SHA-256 内容指纹。MCP 工具由助手白名单和用户确认控制；Skill 本身不执行脚本。
-
-持久化聊天默认限制为每位用户每分钟 30 次请求，使用 PostgreSQL 原子计数保证多个实例之间口径一致。可以通过 `AI2DOT_CHAT_RATE_LIMIT_PER_MINUTE` 调整为 1–300。
-
-## 知识库
-
-登录后访问 `/knowledge`，可以按主题创建知识库并导入 PDF、DOCX、TXT、Markdown、CSV 或 JSON；单文件上限 4MB，PDF 上限 200 页。上传接口返回后会继续在后台解析和分块，页面自动刷新处理状态。
-
-检索使用 PostgreSQL `pg_trgm` 关键词候选和 `pgvector` HNSW 语义候选，通过 RRF、关键词相关度和余弦相似度进行混合重排，并限制单篇文档占用的结果数量。Embedding 默认使用 Vercel AI Gateway 的 `openai/text-embedding-3-small`（1536 维）；也可通过 `AI2DOT_EMBEDDING_PROVIDER_NAME` 复用 `/admin` 中已加密保存的工作区 OpenAI-compatible 供应商，或通过其他 `AI2DOT_EMBEDDING_*` 变量连接独立服务。Embedding 暂不可用时自动降级为关键词检索。
-
-文档切块后会创建持久化的 `knowledge_embedding_jobs` 任务。上传请求通过 Next.js `after()` 尽快处理，Docker worker 每 30 秒补领任务，Vercel Cron 每日兜底；任务使用数据库行锁、租约、幂等更新和指数退避，可在函数终止后继续执行。对话启用知识库后，命中的文档会作为结构化来源随回答一起保存。
-
-## 环境服务
-
-- AI：工作区自带的 OpenAI-compatible 供应商；Vercel AI Gateway 为可选能力
-- Auth：本地单管理员认证（默认）或 Clerk
-- Database：PostgreSQL + Drizzle（工作区、会话分支、消息、Generation、用量、供应商、模型、知识库、MCP 来源、Skill）
-- Rate limit：PostgreSQL 分钟窗口原子计数
-- Documents：文档提取后按片段存入 PostgreSQL；当前不保留原始上传文件
-
-完整变量见 [`.env.example`](./.env.example)。数据库 schema 位于 `src/server/db/schema.ts`，SQL migration 位于 `drizzle/`。
-
-## 检查命令
+## Development Quality Gates
 
 ```bash
 npm run lint
@@ -126,8 +186,22 @@ npm test
 npm run build
 ```
 
-## 项目文档
+GitHub Actions executes the same application checks. The Chrome extension has its own typecheck, test, build, and packaging commands under `extension/`.
 
-- [Docker + Linux 可复现部署手册](./docs/docker-linux-deployment.zh-CN.md)
-- [技术落地方案](./TECHNICAL_PLAN.md)
-- [技术验收方案](./TECHNICAL_ACCEPTANCE_PLAN.md)
+## Documentation
+
+- [Docker + Linux reproducible deployment](./docs/docker-linux-deployment.zh-CN.md)
+- [Docker and Vercel dual-runtime architecture](./docs/dual-runtime-architecture.zh-CN.md)
+- [pgvector installation and verification](./docs/pgvector-installation-and-verification.zh-CN.md)
+- [Chrome extension development](./docs/chrome-extension-development.zh-CN.md)
+- [Notebook Studio development](./docs/notebook-studio-development.zh-CN.md)
+- [Gemini Enterprise Notebook integration](./docs/google-notebook-enterprise-integration.zh-CN.md)
+- [Technical implementation plan](./TECHNICAL_PLAN.md)
+- [Technical acceptance plan](./TECHNICAL_ACCEPTANCE_PLAN.md)
+
+---
+
+<div align="center">
+  <strong>ai2dot</strong><br />
+  Own the workspace. Choose the models. Keep the operating boundary visible.
+</div>

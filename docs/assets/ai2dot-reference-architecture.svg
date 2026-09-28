@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1020" viewBox="0 0 1600 1020" role="img" aria-labelledby="title desc">
+  <title id="title">ai2dot reference architecture</title>
+  <desc id="desc">The ai2dot experience layer, control plane, intelligence services, data foundation, integrations, and Docker or Vercel deployment paths.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090d12"/>
+      <stop offset="1" stop-color="#101720"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#b7f34a"/>
+      <stop offset="1" stop-color="#54d6ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+    <style>
+      .title { font: 700 38px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f4f7f9; letter-spacing: 0; }
+      .subtitle { font: 400 17px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #91a0ad; letter-spacing: 0; }
+      .layer { font: 700 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #7f8d99; letter-spacing: 1.5px; }
+      .card-title { font: 700 18px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f4f7f9; letter-spacing: 0; }
+      .card-copy { font: 400 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #94a2ae; letter-spacing: 0; }
+      .pill { font: 700 12px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: .4px; }
+      .lane-title { font: 700 18px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f4f7f9; letter-spacing: 0; }
+      .lane-copy { font: 400 13px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #9aa8b4; letter-spacing: 0; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1020" rx="28" fill="url(#bg)"/>
+  <path d="M0 1h1600" stroke="url(#brand)" stroke-width="4"/>
+
+  <g transform="translate(64 54)">
+    <rect width="48" height="48" rx="12" fill="#151b22" stroke="#34404a"/>
+    <path d="M12 12h13c9 0 15 5 15 12s-6 12-15 12H12V12Zm13 18c4 0 7-2 7-6s-3-6-7-6h-5v12h5Z" fill="#f1f1eb"/>
+    <circle cx="39" cy="11" r="5" fill="#ff6b57"/>
+    <text x="66" y="27" class="title">AI2DOT REFERENCE ARCHITECTURE</text>
+    <text x="67" y="53" class="subtitle">One product · Two deployment modes · Provider-neutral by design</text>
+  </g>
+
+  <text x="64" y="153" class="layer">EXPERIENCE LAYER</text>
+  <g filter="url(#shadow)">
+    <g transform="translate(64 172)">
+      <rect width="340" height="106" rx="12" fill="#121920" stroke="#2a3540"/>
+      <rect width="5" height="106" rx="2.5" fill="#b7f34a"/>
+      <text x="26" y="39" class="card-title">AI Workspace</text>
+      <text x="26" y="65" class="card-copy">Streaming chat · branches · citations</text>
+      <text x="26" y="86" class="card-copy">model and reasoning controls</text>
+    </g>
+    <g transform="translate(424 172)">
+      <rect width="340" height="106" rx="12" fill="#121920" stroke="#2a3540"/>
+      <rect width="5" height="106" rx="2.5" fill="#54d6ff"/>
+      <text x="26" y="39" class="card-title">Notebook Studio</text>
+      <text x="26" y="65" class="card-copy">Sources · video transcripts · artifacts</text>
+      <text x="26" y="86" class="card-copy">publish research to knowledge</text>
+    </g>
+    <g transform="translate(784 172)">
+      <rect width="340" height="106" rx="12" fill="#121920" stroke="#2a3540"/>
+      <rect width="5" height="106" rx="2.5" fill="#b692ff"/>
+      <text x="26" y="39" class="card-title">Chrome Web Clipper</text>
+      <text x="26" y="65" class="card-copy">Readability extraction · Markdown</text>
+      <text x="26" y="86" class="card-copy">direct knowledge ingestion</text>
+    </g>
+    <g transform="translate(1144 172)">
+      <rect width="392" height="106" rx="12" fill="#121920" stroke="#2a3540"/>
+      <rect width="5" height="106" rx="2.5" fill="#ffb454"/>
+      <text x="26" y="39" class="card-title">Platform Console</text>
+      <text x="26" y="65" class="card-copy">Users · workspaces · usage · storage</text>
+      <text x="26" y="86" class="card-copy">health and administrative audit</text>
+    </g>
+  </g>
+
+  <path d="M800 292v24" stroke="#51606c" stroke-width="2"/>
+  <path d="M793 309l7 8 7-8" fill="none" stroke="#51606c" stroke-width="2"/>
+
+  <text x="64" y="343" class="layer">AI CONTROL PLANE</text>
+  <rect x="64" y="362" width="1472" height="174" rx="15" fill="#0f161d" stroke="#394854"/>
+  <rect x="84" y="382" width="333" height="134" rx="10" fill="#151d25" stroke="#2d3944"/>
+  <text x="108" y="417" class="card-title">Identity &amp; Workspace RBAC</text>
+  <text x="108" y="443" class="card-copy">Local auth or Clerk · tenant isolation</text>
+  <rect x="108" y="468" width="106" height="25" rx="6" fill="#21301b"/>
+  <text x="126" y="485" class="pill" fill="#b7f34a">POLICY GATE</text>
+
+  <rect x="437" y="382" width="333" height="134" rx="10" fill="#151d25" stroke="#2d3944"/>
+  <text x="461" y="417" class="card-title">Agentic Chat Runtime</text>
+  <text x="461" y="443" class="card-copy">Multi-step execution · budgets · replay</text>
+  <rect x="461" y="468" width="112" height="25" rx="6" fill="#18303a"/>
+  <text x="479" y="485" class="pill" fill="#54d6ff">HUMAN LOOP</text>
+
+  <rect x="790" y="382" width="333" height="134" rx="10" fill="#151d25" stroke="#2d3944"/>
+  <text x="814" y="417" class="card-title">Assistants, Skills &amp; MCP</text>
+  <text x="814" y="443" class="card-copy">Instructions · allowlists · tool policy</text>
+  <rect x="814" y="468" width="111" height="25" rx="6" fill="#2b2239"/>
+  <text x="833" y="485" class="pill" fill="#c7a6ff">COMPOSABLE</text>
+
+  <rect x="1143" y="382" width="373" height="134" rx="10" fill="#151d25" stroke="#2d3944"/>
+  <text x="1167" y="417" class="card-title">Provider Registry &amp; Vault</text>
+  <text x="1167" y="443" class="card-copy">BYOK catalog · AES-256-GCM secrets</text>
+  <rect x="1167" y="468" width="104" height="25" rx="6" fill="#382820"/>
+  <text x="1185" y="485" class="pill" fill="#ffb454">ENCRYPTED</text>
+
+  <path d="M800 550v24" stroke="#51606c" stroke-width="2"/>
+  <path d="M793 567l7 8 7-8" fill="none" stroke="#51606c" stroke-width="2"/>
+
+  <text x="64" y="601" class="layer">INTELLIGENCE SERVICES</text>
+  <g>
+    <rect x="64" y="620" width="340" height="103" rx="12" fill="#121920" stroke="#2a3540"/>
+    <text x="88" y="657" class="card-title">Model Gateway</text>
+    <text x="88" y="682" class="card-copy">OpenAI-compatible routing · streaming</text>
+    <text x="88" y="702" class="card-copy">usage and cost accounting</text>
+
+    <rect x="424" y="620" width="340" height="103" rx="12" fill="#121920" stroke="#2a3540"/>
+    <text x="448" y="657" class="card-title">Hybrid RAG</text>
+    <text x="448" y="682" class="card-copy">pg_trgm + pgvector HNSW + RRF</text>
+    <text x="448" y="702" class="card-copy">diverse, citable source retrieval</text>
+
+    <rect x="784" y="620" width="340" height="103" rx="12" fill="#121920" stroke="#2a3540"/>
+    <text x="808" y="657" class="card-title">Artifact Engine</text>
+    <text x="808" y="682" class="card-copy">Summaries · FAQs · timelines</text>
+    <text x="808" y="702" class="card-copy">study guides · mind maps</text>
+
+    <rect x="1144" y="620" width="392" height="103" rx="12" fill="#121920" stroke="#2a3540"/>
+    <text x="1168" y="657" class="card-title">Tool Runtime</text>
+    <text x="1168" y="682" class="card-copy">MCP clients · approvals · timeouts</text>
+    <text x="1168" y="702" class="card-copy">execution and audit lifecycle</text>
+  </g>
+
+  <text x="64" y="765" class="layer">DURABLE DATA FOUNDATION</text>
+  <rect x="64" y="784" width="1472" height="96" rx="14" fill="#101920" stroke="#36505f"/>
+  <g>
+    <text x="96" y="824" class="card-title">PostgreSQL + pgvector</text>
+    <text x="96" y="849" class="card-copy">The system of record for every deployment</text>
+    <line x1="420" y1="806" x2="420" y2="858" stroke="#2f3e49"/>
+    <text x="460" y="824" class="card-title">Generation Ledger</text>
+    <text x="460" y="849" class="card-copy">Idempotency · branches · usage · replay</text>
+    <line x1="795" y1="806" x2="795" y2="858" stroke="#2f3e49"/>
+    <text x="835" y="824" class="card-title">Knowledge &amp; Embeddings</text>
+    <text x="835" y="849" class="card-copy">Chunks · vectors · sources · artifacts</text>
+    <line x1="1188" y1="806" x2="1188" y2="858" stroke="#2f3e49"/>
+    <text x="1228" y="824" class="card-title">Jobs &amp; Audit</text>
+    <text x="1228" y="849" class="card-copy">Leases · retries · tools · admin events</text>
+  </g>
+
+  <g transform="translate(64 914)">
+    <rect width="714" height="72" rx="12" fill="#132018" stroke="#31523a"/>
+    <circle cx="34" cy="36" r="12" fill="#b7f34a"/>
+    <text x="58" y="31" class="lane-title">Self-hosted</text>
+    <text x="58" y="52" class="lane-copy">Cloudflare · Nginx · Next.js · Worker · PostgreSQL</text>
+  </g>
+  <g transform="translate(822 914)">
+    <rect width="714" height="72" rx="12" fill="#14202a" stroke="#315166"/>
+    <circle cx="34" cy="36" r="12" fill="#54d6ff"/>
+    <text x="58" y="31" class="lane-title">Managed cloud</text>
+    <text x="58" y="52" class="lane-copy">Vercel Functions · Cron · Clerk · Neon PostgreSQL</text>
+  </g>
+
+  <path d="M785 880l-350 34M815 880l350 34" fill="none" stroke="#51606c" stroke-width="2"/>
+</svg>

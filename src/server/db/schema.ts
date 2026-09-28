@@ -83,6 +83,20 @@ export const knowledgeEmbeddingJobStatus = pgEnum(
   "knowledge_embedding_job_status",
   ["pending", "running", "completed", "failed"],
 );
+export const notebookStatus = pgEnum("notebook_status", ["active", "archived"]);
+export const notebookArtifactType = pgEnum("notebook_artifact_type", [
+  "summary",
+  "faq",
+  "timeline",
+  "study_guide",
+  "mind_map",
+]);
+export const notebookArtifactStatus = pgEnum("notebook_artifact_status", [
+  "pending",
+  "running",
+  "ready",
+  "failed",
+]);
 export const userStatus = pgEnum("user_status", ["active", "suspended"]);
 export const platformAdminRole = pgEnum("platform_admin_role", [
   "super_admin",
@@ -491,6 +505,118 @@ export const knowledgeEmbeddingJobs = pgTable(
   ],
 );
 
+export const notebooks = pgTable(
+  "notebooks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    knowledgeBaseId: uuid("knowledge_base_id")
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+    assistantId: uuid("assistant_id").references(() => assistants.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: notebookStatus("status").notNull().default("active"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notebooks_knowledge_base_idx").on(table.knowledgeBaseId),
+    index("notebooks_workspace_status_updated_idx").on(
+      table.workspaceId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const notebookVideoSources = pgTable(
+  "notebook_video_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    notebookId: uuid("notebook_id")
+      .notNull()
+      .references(() => notebooks.id, { onDelete: "cascade" }),
+    knowledgeDocumentId: uuid("knowledge_document_id")
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    platform: text("platform").$type<"youtube" | "bilibili">().notNull(),
+    externalId: text("external_id").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    title: text("title").notNull(),
+    authorName: text("author_name"),
+    thumbnailUrl: text("thumbnail_url"),
+    durationSeconds: integer("duration_seconds"),
+    language: text("language"),
+    transcriptOrigin: text("transcript_origin")
+      .$type<"pasted" | "subtitle_upload">()
+      .notNull(),
+    rightsConfirmed: boolean("rights_confirmed").notNull().default(false),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notebook_video_sources_document_idx").on(
+      table.knowledgeDocumentId,
+    ),
+    uniqueIndex("notebook_video_sources_external_idx").on(
+      table.notebookId,
+      table.platform,
+      table.externalId,
+    ),
+    index("notebook_video_sources_notebook_updated_idx").on(
+      table.notebookId,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const notebookArtifacts = pgTable(
+  "notebook_artifacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    notebookId: uuid("notebook_id")
+      .notNull()
+      .references(() => notebooks.id, { onDelete: "cascade" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: notebookArtifactType("type").notNull(),
+    title: text("title").notNull(),
+    contentMarkdown: text("content_markdown"),
+    structuredContent: jsonb("structured_content").$type<Record<string, unknown>>(),
+    status: notebookArtifactStatus("status").notNull().default("pending"),
+    modelId: text("model_id"),
+    sourceSnapshotHash: text("source_snapshot_hash"),
+    publishedDocumentId: uuid("published_document_id").references(
+      () => knowledgeDocuments.id,
+      { onDelete: "set null" },
+    ),
+    errorMessage: text("error_message"),
+    ...timestamps,
+  },
+  (table) => [
+    index("notebook_artifacts_notebook_created_idx").on(
+      table.notebookId,
+      table.createdAt,
+    ),
+    index("notebook_artifacts_status_updated_idx").on(
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
 export const conversations = pgTable(
   "conversations",
   {
@@ -504,6 +630,9 @@ export const conversations = pgTable(
     assistantId: uuid("assistant_id").references(() => assistants.id, {
       onDelete: "set null",
     }),
+    notebookId: uuid("notebook_id").references(() => notebooks.id, {
+      onDelete: "set null",
+    }),
     title: text("title").notNull().default("新对话"),
     summary: text("summary"),
     assistantSnapshot: jsonb("assistant_snapshot").$type<ConversationAssistantSnapshot>(),
@@ -514,6 +643,10 @@ export const conversations = pgTable(
     index("conversations_workspace_user_updated_idx").on(
       table.workspaceId,
       table.userId,
+      table.updatedAt,
+    ),
+    index("conversations_notebook_updated_idx").on(
+      table.notebookId,
       table.updatedAt,
     ),
   ],

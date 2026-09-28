@@ -918,6 +918,7 @@ export function ChatWorkspace({
         </label>
         <nav className="primary-nav" aria-label={t("主导航")}>
           <button className="nav-row is-active"><MessageSquareText size={17} /> {t("对话")} <span>{conversationList.length || 1}</span></button>
+          <Link className="nav-row" href="/notebooks"><BookOpen size={17} /> {t("研究空间")}</Link>
           <Link className="nav-row" href="/assistants"><Bot size={17} /> {t("助手")}</Link>
           <Link className="nav-row" href="/knowledge"><Archive size={17} /> {t("知识库")} <span>{initialKnowledgeBases.length}</span></Link>
           <Link className="nav-row" href="/admin"><Settings2 size={17} /> {t("模型管理")}</Link>
