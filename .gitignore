@@ -48,3 +48,5 @@ next-env.d.ts
 /TECHNICAL_*.md
 /docs/**/*.md
 /extension/README.md
+*.[dD][oO][cC]
+*.[dD][oO][cC][xX]
