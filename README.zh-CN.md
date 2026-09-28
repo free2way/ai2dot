@@ -7,7 +7,6 @@
   <p>
     <a href="https://ai2note.com"><strong>产品网站</strong></a> ·
     <a href="https://ai.ai2dot.com"><strong>云端应用</strong></a> ·
-    <a href="./docs/docker-linux-deployment.zh-CN.md"><strong>部署手册</strong></a> ·
     <a href="./README.md"><strong>English</strong></a>
   </p>
 
@@ -85,9 +84,7 @@ Notebook Studio 将研究过程与知识库连接为一条完整工作流：
 5. 审阅并编辑 Markdown 产物；
 6. 将产物发布回知识库，供后续对话检索。
 
-Gemini Enterprise Notebook 被设计为**可选外部 Provider**。当前仓库已经具备配置与准备状态检查；生产 OAuth、Notebook/Source 同步和报告导入仍处于技术方案阶段，并受 Feature Flag 控制。没有 Google 服务时，ai2dot 原生 Notebook Studio 仍可独立工作。
-
-完整方案见 [Gemini Enterprise Notebook 集成技术文档](./docs/google-notebook-enterprise-integration.zh-CN.md)。
+Gemini Enterprise Notebook 被设计为**可选外部 Provider**。当前仓库已经具备配置与准备状态检查；生产 OAuth、Notebook/Source 同步和报告导入仍受 Feature Flag 控制。没有 Google 服务时，ai2dot 原生 Notebook Studio 仍可独立工作。
 
 ## 安全边界
 
@@ -103,82 +100,6 @@ Gemini Enterprise Notebook 被设计为**可选外部 Provider**。当前仓库�
 
 这些机制用于降低系统风险，但不能替代企业自身的威胁建模、密钥轮换、网络策略与合规审查。
 
-## 快速开始
-
-### 本地开发
-
-环境要求：Node.js 20.9+ 与 npm。
-
-```bash
-git clone https://github.com/free2way/ai2dot.git
-cd ai2dot
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-打开 `http://localhost:3000`。未配置认证和数据库时，ai2dot 会以本地演示模式启动；配置认证、PostgreSQL 和模型供应商后即可启用持久化工作区。
-
-### Docker 部署
-
-```bash
-cp .env.example .env
-
-# 将生成的 scrypt 哈希填写到 AI2DOT_LOCAL_AUTH_PASSWORD_HASH。
-npm run auth:hash-password -- 'replace-with-a-strong-password'
-
-docker compose up -d postgres
-docker compose --profile tools run --rm migrate
-docker compose up -d --build app proxy
-docker compose ps
-```
-
-生产镜像使用 Next.js standalone 输出并以非 root 用户运行。Nginx 提供压缩、连接复用、静态资源缓存和无缓冲流式响应。PostgreSQL 数据保存在 `ai2dot_postgres-data` 命名卷中。
-
-主机准备、备份、Cloudflare Tunnel、Clerk、健康检查、回滚和恢复步骤见 [Docker + Linux 可复现部署手册](./docs/docker-linux-deployment.zh-CN.md)。
-
-### Vercel 部署
-
-1. 创建支持 `pgvector` 与 `pg_trgm` 的 Neon PostgreSQL；
-2. 配置池化 `DATABASE_URL` 和非池化 `DATABASE_URL_UNPOOLED`；
-3. 配置 Clerk 或所需认证变量；
-4. 配置 `PROVIDER_SECRET_ENCRYPTION_KEY` 和模型供应商；
-5. 使用 `npm run vercel-build` 部署，构建前会执行 migration；
-6. 使用 `CRON_SECRET` 保护 Embedding 补偿任务端点。
-
-两种运行环境的差异见 [Docker 与 Vercel 双运行环境架构](./docs/dual-runtime-architecture.zh-CN.md)。
-
-## 配置概览
-
-| 范围 | 主要变量 |
-| --- | --- |
-| 数据库 | `DATABASE_URL`、`DATABASE_URL_UNPOOLED`、`DATABASE_POOL_MAX` |
-| 认证 | `AI2DOT_AUTH_MODE`、`AI2DOT_SESSION_SECRET`、Clerk keys |
-| 本地登录 | `AI2DOT_LOCAL_AUTH_EMAIL`、`AI2DOT_LOCAL_AUTH_PASSWORD_HASH` |
-| 凭据加密 | `PROVIDER_SECRET_ENCRYPTION_KEY` |
-| AI Gateway | `AI_GATEWAY_API_KEY`、`AI2DOT_ENABLE_AI_GATEWAY` |
-| Embedding | `AI2DOT_EMBEDDING_*` |
-| Agent 控制 | `AI2DOT_TOOL_APPROVAL_SECRET`、MCP 来源配置 |
-| 后台任务 | `CRON_SECRET`、Embedding 批量与租约配置 |
-| Docker | `AI2DOT_PORT`、`AI2DOT_NODE_MEMORY_MB`、PostgreSQL 变量 |
-
-完整配置和注释见 [`.env.example`](./.env.example)。不要把 `.env`、OAuth Secret、数据库密码、Tunnel Token 或模型 API Key 提交到 Git。
-
-## 仓库结构
-
-```text
-src/app/                 Next.js App Router 页面与 Route Handlers
-src/components/          工作台、管理、知识库、Notebook 和宣传页组件
-src/server/              认证、数据库、供应商、MCP、知识库和运营服务
-src/lib/                 共享领域类型、策略、解析和展示数据
-drizzle/                 版本化 PostgreSQL migrations
-extension/               Chrome Manifest V3 网页剪藏扩展
-deploy/                  Nginx 与部署资产
-docs/                    架构、部署、扩展与数据库文档
-compose.yaml             私有部署生产拓扑
-Dockerfile               多阶段 Next.js standalone 镜像
-```
-
 ## 质量检查
 
 ```bash
@@ -189,17 +110,6 @@ npm run build
 ```
 
 GitHub Actions 会执行同类应用检查。Chrome 扩展在 `extension/` 下拥有独立的 typecheck、测试、构建和打包命令。
-
-## 技术文档
-
-- [Docker + Linux 可复现部署](./docs/docker-linux-deployment.zh-CN.md)
-- [Docker 与 Vercel 双运行环境架构](./docs/dual-runtime-architecture.zh-CN.md)
-- [pgvector 安装与验证](./docs/pgvector-installation-and-verification.zh-CN.md)
-- [Chrome 扩展开发](./docs/chrome-extension-development.zh-CN.md)
-- [Notebook Studio 开发](./docs/notebook-studio-development.zh-CN.md)
-- [Gemini Enterprise Notebook 集成](./docs/google-notebook-enterprise-integration.zh-CN.md)
-- [技术落地方案](./TECHNICAL_PLAN.md)
-- [技术验收方案](./TECHNICAL_ACCEPTANCE_PLAN.md)
 
 ---
 

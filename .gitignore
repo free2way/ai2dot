@@ -41,3 +41,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local-only project and implementation documentation
+/AGENTS.md
+/CLAUDE.md
+/TECHNICAL_*.md
+/docs/**/*.md
+/extension/README.md
