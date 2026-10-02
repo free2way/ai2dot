@@ -377,6 +377,8 @@ export function ChatWorkspace({
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const sendErrorRef = useRef<Error | null>(null);
   const retryRef = useRef<{ intent: string; key: string; messageId: string } | null>(null);
+  // Creating the persisted conversation must not replace an in-flight SDK chat.
+  const [chatInstanceId] = useState(initialConversationId ?? "demo-workspace");
 
   const {
     messages,
@@ -389,7 +391,7 @@ export function ChatWorkspace({
     error,
     clearError,
   } = useChat({
-    id: activeConversationId ?? "demo-workspace",
+    id: chatInstanceId,
     messages: initialMessages && initialMessages.length > 0 ? initialMessages : welcomeMessages,
     transport: CHAT_TRANSPORT,
     throttle: 24,
