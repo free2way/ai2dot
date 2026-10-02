@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Bot,
+  BookOpen,
   Check,
   Database,
   MessageSquareText,
@@ -31,6 +32,14 @@ type Props = {
   models: ModelCatalogEntry[];
   knowledgeBases: KnowledgeBaseSummary[];
   mcpSources?: { id: string; name: string; toolCount: number }[];
+  skills?: {
+    id: string;
+    versionId: string;
+    name: string;
+    description: string;
+    version: string;
+    enabled: boolean;
+  }[];
 };
 
 function formFromAssistant(assistant: AssistantSummary): AssistantInput {
@@ -43,6 +52,7 @@ function formFromAssistant(assistant: AssistantSummary): AssistantInput {
     defaultModelKey: assistant.defaultModelKey ?? "",
     knowledgeBaseIds: assistant.knowledgeBaseIds,
     mcpSourceIds: assistant.mcpSourceIds ?? [],
+    skillSelection: assistant.skillSelection,
   };
 }
 
@@ -51,6 +61,7 @@ export function AssistantManager({
   models,
   knowledgeBases,
   mcpSources = [],
+  skills = [],
 }: Props) {
   const { t } = useLanguage();
   const router = useRouter();
@@ -245,6 +256,25 @@ export function AssistantManager({
     updateForm("mcpSourceIds", next);
   };
 
+  const toggleSkill = (skillId: string, versionId: string) => {
+    const active = form.skillSelection.refs.some(
+      (reference) => reference.versionId === versionId,
+    );
+    const refs = active
+      ? form.skillSelection.refs.filter(
+          (reference) => reference.versionId !== versionId,
+        )
+      : [
+          ...form.skillSelection.refs,
+          { skillId, versionId },
+        ].slice(0, 3);
+    updateForm("skillSelection", {
+      ...form.skillSelection,
+      mode: refs.length > 0 ? "manual" : form.skillSelection.mode,
+      refs,
+    });
+  };
+
   return (
     <main className="assistant-shell">
       <header className="admin-topbar">
@@ -332,6 +362,25 @@ export function AssistantManager({
                 </div>
               ) : (
                 <div className="assistant-empty-knowledge"><p>{t("还没有知识库。")}</p><Link href="/knowledge">{t("创建知识库")} <ArrowUpRight size={13} /></Link></div>
+              )}
+            </section>
+
+            <section className="assistant-form-section assistant-knowledge-section">
+              <div className="assistant-section-heading"><span><BookOpen size={15} /> 默认 Skills</span><small>{form.skillSelection.refs.length} / 3</small></div>
+              <p className="assistant-section-help">新会话会冻结这里指定的 Skill 版本；以后修改助手不会静默改变已有会话。</p>
+              <div className="assistant-skill-controls">
+                <label><span>模式</span><select value={form.skillSelection.mode} onChange={(event) => updateForm("skillSelection", { ...form.skillSelection, mode: event.target.value as AssistantInput["skillSelection"]["mode"], refs: event.target.value === "auto" ? [] : form.skillSelection.refs })}><option value="auto">自动匹配</option><option value="manual">仅指定 Skill</option><option value="hybrid">指定优先 + 自动补充</option></select></label>
+                <label><span>上下文范围</span><select value={form.skillSelection.contextTarget} onChange={(event) => updateForm("skillSelection", { ...form.skillSelection, contextTarget: event.target.value as AssistantInput["skillSelection"]["contextTarget"] })}><option value="current_message">当前消息</option><option value="recent_messages">最近消息</option><option value="conversation">可用会话上下文</option></select></label>
+              </div>
+              {skills.filter((skill) => skill.enabled).length > 0 ? (
+                <div className="assistant-knowledge-list">
+                  {skills.filter((skill) => skill.enabled).map((skill) => {
+                    const active = form.skillSelection.refs.some((reference) => reference.versionId === skill.versionId);
+                    return <button aria-pressed={active} data-active={active} key={skill.versionId} onClick={() => toggleSkill(skill.id, skill.versionId)} type="button"><BookOpen size={14} /><span><strong>{skill.name}</strong><small>v{skill.version} · {skill.description}</small></span>{active && <Check size={14} />}</button>;
+                  })}
+                </div>
+              ) : (
+                <div className="assistant-empty-knowledge"><p>还没有可用的 Skill。</p><Link href="/skills">浏览 Skill Library <ArrowUpRight size={13} /></Link></div>
               )}
             </section>
 

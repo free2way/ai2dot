@@ -11,6 +11,7 @@ const mcpSourceSchema = z.object({
   transport: z.enum(["http", "sse"]).default("http"),
   url: z.string().url(),
   secret: z.string().trim().max(4_000).optional(),
+  templateId: z.string().trim().min(1).max(80).optional(),
 });
 
 export async function GET() {

@@ -2,6 +2,10 @@ import "server-only";
 
 import { and, asc, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { UIMessage } from "ai";
+import {
+  DEFAULT_SKILL_SELECTION,
+  type SkillSelection,
+} from "@/lib/skill-selection";
 import type {
   ConversationBranch,
   ConversationListItem,
@@ -77,6 +81,7 @@ export async function createConversation(
             defaultModelKey: assistant.defaultModelKey,
             knowledgeBaseIds: assistant.knowledgeBaseIds,
             mcpSourceIds: assistant.mcpSourceIds,
+            skillSelection: assistant.skillSelection,
           }
         : undefined,
       title: input.title || "新对话",
@@ -215,6 +220,8 @@ export async function listConversationBranches(
       isDefault: conversationBranches.isDefault,
       hasContextSummary: isNotNull(conversationBranches.contextSummary),
       createdAt: conversationBranches.createdAt,
+      skillSelection: conversationBranches.skillSelection,
+      skillSelectionRevision: conversationBranches.skillSelectionRevision,
       messageCount: count(messages.id),
     })
     .from(conversationBranches)
@@ -228,6 +235,8 @@ export async function listConversationBranches(
     hasContextSummary: Boolean(row.hasContextSummary),
     createdAt: row.createdAt.toISOString(),
     messageCount: Number(row.messageCount),
+    skillSelection: row.skillSelection,
+    skillSelectionRevision: row.skillSelectionRevision,
   }));
 }
 
@@ -394,6 +403,11 @@ export async function forkConversationBranch({
       forkedFromClientMessageId: fromMessageId,
       name: `分支 ${branchRows.length}`,
       isDefault: false,
+      skillSelection:
+        sourceBranch.skillSelection ??
+        sourceBranchSelectionFromConversation(
+          await getConversation(context, conversationId),
+        ),
     })
     .returning();
 
@@ -425,6 +439,8 @@ export async function forkConversationBranch({
       hasContextSummary: false,
       createdAt: branch.createdAt.toISOString(),
       messageCount: prefix.length,
+      skillSelection: branch.skillSelection,
+      skillSelectionRevision: branch.skillSelectionRevision,
     } satisfies ConversationBranch,
     messages: prefix
       .filter((row) => row.role !== "tool")
@@ -434,6 +450,87 @@ export async function forkConversationBranch({
         parts: row.parts as UIMessage["parts"],
       })),
   };
+}
+
+function sourceBranchSelectionFromConversation(
+  conversation: Awaited<ReturnType<typeof getConversation>>,
+) {
+  return conversation?.assistantSnapshot?.skillSelection ?? DEFAULT_SKILL_SELECTION;
+}
+
+export async function getEffectiveBranchSkillSelection(
+  context: WorkspaceContext,
+  conversationId: string,
+  branchId: string,
+) {
+  const [branch, conversation] = await Promise.all([
+    getConversationBranch(context, conversationId, branchId),
+    getConversation(context, conversationId),
+  ]);
+  if (!branch || !conversation) return null;
+  if (branch.skillSelection) {
+    return {
+      selection: branch.skillSelection,
+      source: "branch" as const,
+      revision: branch.skillSelectionRevision,
+      savedSelection: branch.skillSelection,
+    };
+  }
+  if (conversation.assistantSnapshot?.skillSelection) {
+    return {
+      selection: conversation.assistantSnapshot.skillSelection,
+      source: "assistant" as const,
+      revision: branch.skillSelectionRevision,
+      savedSelection: null,
+    };
+  }
+  return {
+    selection: DEFAULT_SKILL_SELECTION,
+    source: "auto" as const,
+    revision: branch.skillSelectionRevision,
+    savedSelection: null,
+  };
+}
+
+export async function updateConversationBranchSkillSelection({
+  context,
+  conversationId,
+  branchId,
+  expectedRevision,
+  selection,
+}: {
+  context: WorkspaceContext;
+  conversationId: string;
+  branchId: string;
+  expectedRevision: number;
+  selection: SkillSelection | null;
+}) {
+  const branch = await getConversationBranch(context, conversationId, branchId);
+  if (!branch) return { kind: "not_found" as const };
+  const [updated] = await getDb()
+    .update(conversationBranches)
+    .set({
+      skillSelection: selection,
+      skillSelectionRevision: expectedRevision + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(conversationBranches.id, branchId),
+        eq(conversationBranches.conversationId, conversationId),
+        eq(conversationBranches.skillSelectionRevision, expectedRevision),
+      ),
+    )
+    .returning({ revision: conversationBranches.skillSelectionRevision });
+  if (!updated) return { kind: "conflict" as const };
+  const effective = await getEffectiveBranchSkillSelection(
+    context,
+    conversationId,
+    branchId,
+  );
+  return effective
+    ? { kind: "updated" as const, ...effective }
+    : { kind: "not_found" as const };
 }
 
 export async function updateConversation(

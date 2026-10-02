@@ -50,5 +50,39 @@ describe("fingerprintGenerationRequest", () => {
         reasoning: "high",
       }),
     );
+    expect(fingerprintGenerationRequest(request)).not.toBe(
+      fingerprintGenerationRequest({
+        ...request,
+        skillSelection: {
+          mode: "manual",
+          refs: [],
+          contextTarget: "current_message",
+        },
+      }),
+    );
+  });
+
+  it("treats Skill reference order as request intent", () => {
+    const first = {
+      skillId: "00000000-0000-4000-8000-000000000001",
+      versionId: "00000000-0000-4000-8000-000000000011",
+    };
+    const second = {
+      skillId: "00000000-0000-4000-8000-000000000002",
+      versionId: "00000000-0000-4000-8000-000000000012",
+    };
+    const skillSelection = {
+      mode: "manual" as const,
+      refs: [first, second],
+      contextTarget: "recent_messages" as const,
+    };
+    expect(
+      fingerprintGenerationRequest({ ...request, skillSelection }),
+    ).not.toBe(
+      fingerprintGenerationRequest({
+        ...request,
+        skillSelection: { ...skillSelection, refs: [second, first] },
+      }),
+    );
   });
 });

@@ -10,6 +10,7 @@ import {
 import { listKnowledgeBases } from "@/server/knowledge/store";
 import { listMcpSources } from "@/server/mcp/store";
 import { listEnabledChatModels } from "@/server/providers/store";
+import { listSkills } from "@/server/skills/store";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,12 @@ export default async function AssistantsPage() {
   if (!isAuthConfigured() || !isPersistenceConfigured()) redirect("/");
   const context = await getWorkspaceContext();
   if (!context) redirect("/sign-in");
-  const [assistants, models, knowledgeBases, mcpSources] = await Promise.all([
+  const [assistants, models, knowledgeBases, mcpSources, skills] = await Promise.all([
     listAssistants(context),
     listEnabledChatModels(context),
     listKnowledgeBases(context),
     listMcpSources(context),
+    listSkills(context),
   ]);
   return (
     <AssistantManager
@@ -35,6 +37,18 @@ export default async function AssistantsPage() {
           name: source.name,
           toolCount: source.tools.length,
         }))}
+      skills={skills.flatMap((skill) =>
+        skill.versionId
+          ? [{
+              id: skill.id,
+              versionId: skill.versionId,
+              name: skill.name,
+              description: skill.description,
+              version: skill.version,
+              enabled: skill.enabled,
+            }]
+          : [],
+      )}
     />
   );
 }

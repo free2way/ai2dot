@@ -1,5 +1,13 @@
 import { sql } from "drizzle-orm";
 import type { ConversationAssistantSnapshot } from "@/lib/assistants";
+import type {
+  SkillContextTarget,
+  SkillDependency,
+  SkillInvocationStatus,
+  SkillMode,
+  SkillResolution,
+  SkillSelection,
+} from "@/lib/skill-selection";
 import {
   boolean,
   index,
@@ -67,6 +75,22 @@ export const skillSourceType = pgEnum("skill_source_type", [
   "github",
   "url",
   "builtin",
+]);
+export const skillMode = pgEnum("skill_mode", ["auto", "manual", "hybrid"]);
+export const skillContextTarget = pgEnum("skill_context_target", [
+  "current_message",
+  "recent_messages",
+  "conversation",
+]);
+export const skillInvocationStatus = pgEnum("skill_invocation_status", [
+  "resolved",
+  "included",
+  "omitted",
+  "blocked",
+  "awaiting_approval",
+  "completed",
+  "failed",
+  "stopped",
 ]);
 export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
   "processing",
@@ -267,6 +291,7 @@ export const mcpSources = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    templateId: text("template_id"),
     description: text("description"),
     transport: mcpTransport("transport").notNull().default("http"),
     url: text("url").notNull(),
@@ -289,6 +314,11 @@ export const skills = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    catalogId: text("catalog_id"),
+    currentVersionId: uuid("current_version_id"),
+    category: text("category"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    policyRevision: integer("policy_revision").notNull().default(0),
     description: text("description").notNull(),
     version: text("version").notNull().default("1.0.0"),
     sourceType: skillSourceType("source_type").notNull().default("manual"),
@@ -303,7 +333,52 @@ export const skills = pgTable(
   },
   (table) => [
     uniqueIndex("skills_workspace_slug_idx").on(table.workspaceId, table.slug),
+    uniqueIndex("skills_workspace_catalog_idx")
+      .on(table.workspaceId, table.catalogId)
+      .where(sql`${table.catalogId} is not null`),
     index("skills_workspace_enabled_idx").on(table.workspaceId, table.enabled),
+  ],
+);
+
+export const skillVersions = pgTable(
+  "skill_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id),
+    version: text("version").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    instructions: text("instructions").notNull(),
+    keywords: jsonb("keywords").$type<string[]>().notNull().default([]),
+    dependencyManifest: jsonb("dependency_manifest")
+      .$type<SkillDependency[]>()
+      .notNull()
+      .default([]),
+    legacyRequiredMcp: jsonb("legacy_required_mcp")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    contentHash: text("content_hash").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    changeNotes: text("change_notes"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("skill_versions_skill_hash_idx").on(
+      table.skillId,
+      table.contentHash,
+    ),
+    index("skill_versions_skill_created_idx").on(
+      table.skillId,
+      table.createdAt,
+    ),
   ],
 );
 
@@ -348,9 +423,41 @@ export const assistants = pgTable(
     welcomeMessage: text("welcome_message"),
     defaultModelKey: text("default_model_key"),
     defaultModelId: uuid("default_model_id").references(() => models.id),
+    skillMode: skillMode("skill_mode").$type<SkillMode>().notNull().default("auto"),
+    skillContextTarget: skillContextTarget("skill_context_target")
+      .$type<SkillContextTarget>()
+      .notNull()
+      .default("recent_messages"),
     ...timestamps,
   },
   (table) => [index("assistants_workspace_idx").on(table.workspaceId)],
+);
+
+export const assistantSkills = pgTable(
+  "assistant_skills",
+  {
+    assistantId: uuid("assistant_id")
+      .notNull()
+      .references(() => assistants.id, { onDelete: "cascade" }),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id),
+    skillVersionId: uuid("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.assistantId, table.position] }),
+    uniqueIndex("assistant_skills_assistant_version_idx").on(
+      table.assistantId,
+      table.skillVersionId,
+    ),
+    index("assistant_skills_skill_idx").on(table.skillId),
+  ],
 );
 
 export const assistantMcpSources = pgTable(
@@ -667,6 +774,10 @@ export const conversationBranches = pgTable(
     summaryThroughClientMessageId: text(
       "summary_through_client_message_id",
     ),
+    skillSelection: jsonb("skill_selection").$type<SkillSelection>(),
+    skillSelectionRevision: integer("skill_selection_revision")
+      .notNull()
+      .default(0),
     ...timestamps,
   },
   (table) => [
@@ -730,6 +841,12 @@ export const generations = pgTable(
       onDelete: "set null",
     }),
     providerModelId: text("provider_model_id").notNull(),
+    skillResolution: jsonb("skill_resolution").$type<SkillResolution>(),
+    skillSelectionHash: text("skill_selection_hash"),
+    parentGenerationId: uuid("parent_generation_id"),
+    executionPlanVersion: integer("execution_plan_version")
+      .notNull()
+      .default(1),
     status: generationStatus("status").notNull().default("pending"),
     responseMessage: jsonb("response_message").$type<Record<string, unknown>>(),
     inputTokens: integer("input_tokens").notNull().default(0),
@@ -746,12 +863,67 @@ export const generations = pgTable(
       table.workspaceId,
       table.idempotencyKey,
     ),
+    uniqueIndex("generations_parent_continuation_idx")
+      .on(table.parentGenerationId)
+      .where(sql`${table.parentGenerationId} is not null`),
     index("generations_conversation_created_idx").on(
       table.conversationId,
       table.createdAt,
     ),
     index("generations_status_updated_idx").on(table.status, table.updatedAt),
     index("generations_model_created_idx").on(table.modelId, table.createdAt),
+  ],
+);
+
+export const generationSkillInvocations = pgTable(
+  "generation_skill_invocations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    generationId: uuid("generation_id")
+      .notNull()
+      .references(() => generations.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id),
+    skillVersionId: uuid("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id),
+    position: integer("position").notNull(),
+    trigger: text("trigger").notNull(),
+    snapshot: jsonb("snapshot_json")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    status: skillInvocationStatus("status")
+      .$type<SkillInvocationStatus>()
+      .notNull()
+      .default("resolved"),
+    statusReason: text("status_reason"),
+    contextTarget: skillContextTarget("context_target")
+      .$type<SkillContextTarget>()
+      .notNull(),
+    estimatedInputTokens: integer("estimated_input_tokens").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("generation_skill_invocations_position_idx").on(
+      table.generationId,
+      table.position,
+    ),
+    index("generation_skill_invocations_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
   ],
 );
 

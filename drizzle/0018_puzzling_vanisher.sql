@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "generations_parent_continuation_idx" ON "generations" USING btree ("parent_generation_id") WHERE "generations"."parent_generation_id" is not null;

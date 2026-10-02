@@ -25,6 +25,7 @@ import { MCP_PRESETS, type McpPreset } from "@/lib/mcp-presets";
 
 export type McpSourceSummary = {
   id: string;
+  templateId: string | null;
   name: string;
   description: string | null;
   transport: "http" | "sse";
@@ -162,7 +163,12 @@ export function McpSourceManager({
         {
           method: editingId ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(formState),
+          body: JSON.stringify({
+            ...formState,
+            ...(!editingId && activePresetId
+              ? { templateId: activePresetId }
+              : {}),
+          }),
         },
       );
       const payload = (await response.json()) as { message?: string; source?: McpSourceSummary };

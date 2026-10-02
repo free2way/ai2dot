@@ -1,3 +1,8 @@
+import {
+  DEFAULT_SKILL_SELECTION,
+  type SkillSelection,
+} from "@/lib/skill-selection";
+
 export type AssistantSummary = {
   id: string;
   name: string;
@@ -8,6 +13,7 @@ export type AssistantSummary = {
   defaultModelKey: string | null;
   knowledgeBaseIds: string[];
   mcpSourceIds: string[];
+  skillSelection: SkillSelection;
   updatedAt: string;
 };
 
@@ -20,6 +26,7 @@ export type AssistantInput = {
   defaultModelKey?: string;
   knowledgeBaseIds: string[];
   mcpSourceIds: string[];
+  skillSelection: SkillSelection;
 };
 
 export type ConversationAssistantSnapshot = {
@@ -32,6 +39,7 @@ export type ConversationAssistantSnapshot = {
   defaultModelKey: string | null;
   knowledgeBaseIds: string[];
   mcpSourceIds: string[];
+  skillSelection: SkillSelection;
 };
 
 export const ORACLE_ASSISTANT_TEMPLATE: AssistantInput = {
@@ -46,6 +54,7 @@ export const ORACLE_ASSISTANT_TEMPLATE: AssistantInput = {
   defaultModelKey: "",
   knowledgeBaseIds: [],
   mcpSourceIds: [],
+  skillSelection: DEFAULT_SKILL_SELECTION,
 };
 
 export function normalizeAssistantAvatar(value: string, name: string) {

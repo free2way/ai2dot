@@ -56,7 +56,14 @@ import {
 } from "ai";
 import { BrandMark } from "@/components/brand-mark";
 import { MarkdownContent } from "@/components/chat/markdown-content";
+import {
+  SkillPicker,
+  type ChatSkillItem,
+} from "@/components/chat/skill-picker";
 import { getKnowledgeSourceParts } from "@/lib/chat-sources";
+import { chatDraftKey, parseChatDraft } from "@/lib/chat-draft";
+import { getMessageSkillResolution, hasPendingToolApproval } from "@/lib/skill-execution";
+import { createClientUuid } from "@/lib/client-uuid";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import type {
   ConversationBranch,
@@ -65,6 +72,11 @@ import type {
 import { filterConversations } from "@/lib/conversations";
 import { getGreetingText } from "@/lib/greeting";
 import type { KnowledgeBaseSummary } from "@/lib/knowledge";
+import {
+  DEFAULT_SKILL_SELECTION,
+  parseSkillTokens,
+  type SkillSelection,
+} from "@/lib/skill-selection";
 import {
   DEFAULT_MODEL_ID,
   formatContextWindow,
@@ -97,6 +109,7 @@ const QUICK_STARTS = [
 
 const STORAGE_KEY = "ai2dot.demo.messages.v1";
 const KNOWLEDGE_SELECTION_KEY = "ai2dot.knowledge.selection.v1";
+const RECENT_SKILLS_KEY = "ai2dot.skills.recent.v1";
 const CHAT_TRANSPORT = new DefaultChatTransport({ api: "/api/chat" });
 
 type ChatWorkspaceProps = {
@@ -106,6 +119,8 @@ type ChatWorkspaceProps = {
   signedIn?: boolean;
   gatewayEnabled: boolean;
   persistenceEnabled?: boolean;
+  storageIdentity?: string;
+  explicitSkillsEnabled?: boolean;
   initialConversationId?: string;
   initialBranchId?: string;
   initialMessages?: UIMessage[];
@@ -115,7 +130,11 @@ type ChatWorkspaceProps = {
   initialModelId?: string;
   initialKnowledgeBaseIds?: string[];
   initialMcpSourceIds?: string[];
-  initialAssistant?: { name: string; description?: string | null };
+  initialAssistant?: {
+    name: string;
+    description?: string | null;
+    skillSelection?: SkillSelection;
+  };
   initialUserName?: string | null;
   initialKnowledgeBases?: KnowledgeBaseSummary[];
   initialMcpSources?: {
@@ -124,14 +143,9 @@ type ChatWorkspaceProps = {
     transport: "http" | "sse";
     enabled: boolean;
     toolCount: number;
+    templateId: string | null;
   }[];
-  initialSkills?: {
-    id: string;
-    name: string;
-    description: string;
-    enabled: boolean;
-    autoLoad: boolean;
-  }[];
+  initialSkills?: ChatSkillItem[];
 };
 
 function formatConversationTime(value: string) {
@@ -160,6 +174,27 @@ function MessageKnowledgeSources({ message }: { message: UIMessage }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function MessageSkillResolution({ message }: { message: UIMessage }) {
+  const resolution = getMessageSkillResolution(message);
+  if (!resolution) {
+    return <p className="message-skill-unrecorded"><BookOpen size={12} /> Skills：未记录</p>;
+  }
+  const included = resolution.skills.filter((skill) =>
+    ["included", "awaiting_approval", "completed", "failed", "stopped"].includes(skill.status),
+  );
+  const omitted = resolution.skills.filter((skill) => skill.status === "omitted");
+  return (
+    <details className="message-skill-resolution">
+      <summary><BookOpen size={13} /> Skills：{included.length > 0 ? included.map((skill) => `${skill.name} v${skill.version}`).join(" · ") : "本次未调用"}</summary>
+      <div>
+        <p>{resolution.mode === "auto" ? "自动" : resolution.mode === "manual" ? "手动" : "混合"} · {resolution.contextTarget === "current_message" ? "当前消息" : resolution.contextTarget === "recent_messages" ? "最近消息" : "可用会话上下文"} · 预算 {resolution.budgetTokens.toLocaleString("zh-CN")} tokens（估算）</p>
+        {resolution.skills.map((skill) => <span data-status={skill.status} key={skill.versionId}><strong>{skill.name} v{skill.version}</strong><small>{skill.status === "omitted" ? `未调用：${skill.statusReason ?? "策略省略"}` : `已注入工作流 · 约 ${skill.estimatedInputTokens} tokens`}</small></span>)}
+        {omitted.length > 0 && <p>有 {omitted.length} 个自动匹配项因依赖或预算未注入。</p>}
+      </div>
+    </details>
   );
 }
 
@@ -256,6 +291,8 @@ export function ChatWorkspace({
   signedIn = false,
   gatewayEnabled,
   persistenceEnabled = false,
+  storageIdentity,
+  explicitSkillsEnabled = true,
   initialConversationId,
   initialBranchId,
   initialMessages,
@@ -302,6 +339,25 @@ export function ChatWorkspace({
   const [selectedMcpSourceIds, setSelectedMcpSourceIds] = useState<string[]>(
     initialMcpSourceIds.slice(0, 10),
   );
+  const initialBranch = initialBranches.find(
+    (branch) => branch.id === initialBranchId,
+  );
+  const inheritedSkillSelection =
+    initialBranch?.skillSelection ??
+    initialAssistant?.skillSelection ??
+    DEFAULT_SKILL_SELECTION;
+  const [persistedSkillSelection, setPersistedSkillSelection] =
+    useState<SkillSelection>(inheritedSkillSelection);
+  const [skillSelection, setSkillSelection] =
+    useState<SkillSelection>(inheritedSkillSelection);
+  const [skillScope, setSkillScope] = useState<"message" | "branch">("message");
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const [skillSaving, setSkillSaving] = useState(false);
+  const [skillOverrideDirty, setSkillOverrideDirty] = useState(false);
+  const [skillRevision, setSkillRevision] = useState(
+    initialBranch?.skillSelectionRevision ?? 0,
+  );
+  const [recentSkillVersionIds, setRecentSkillVersionIds] = useState<string[]>([]);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [contextCompacted, setContextCompacted] = useState(
     initialContextCompacted,
@@ -319,6 +375,8 @@ export function ChatWorkspace({
   );
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendErrorRef = useRef<Error | null>(null);
+  const retryRef = useRef<{ intent: string; key: string; messageId: string } | null>(null);
 
   const {
     messages,
@@ -336,6 +394,7 @@ export function ChatWorkspace({
     transport: CHAT_TRANSPORT,
     throttle: 24,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    onError: (error) => { sendErrorRef.current = error; },
   });
 
   useEffect(() => {
@@ -370,10 +429,54 @@ export function ChatWorkspace({
   const selectedKnowledgeBases = initialKnowledgeBases.filter((base) =>
     selectedKnowledgeBaseIds.includes(base.id),
   );
+  const availableMcpTemplateIds = initialMcpSources
+    .filter(
+      (source) =>
+        source.enabled &&
+        source.toolCount > 0 &&
+        source.templateId &&
+        selectedMcpSourceIds.includes(source.id),
+    )
+    .map((source) => source.templateId!)
+    .filter((id, index, items) => items.indexOf(id) === index);
   const activeConversation = conversationList.find(
     (conversation) => conversation.id === activeConversationId,
   );
   const isBusy = status === "submitted" || status === "streaming";
+  const approvalMessage = messages.at(-1);
+  const isAwaitingApproval = Boolean(approvalMessage?.role === "assistant" && hasPendingToolApproval(approvalMessage));
+  const skillControlsLocked = isBusy || isAwaitingApproval || skillSaving;
+  const recentSkillsKey = `${RECENT_SKILLS_KEY}:${storageIdentity ?? "demo"}`;
+  const draftKey = storageIdentity ? chatDraftKey(storageIdentity, activeConversationId, activeBranchId) : undefined;
+  const returnTo = activeConversationId && activeBranchId
+    ? `/chat/${activeConversationId}?branch=${activeBranchId}` : "/workspace";
+
+  const saveComposerDraft = () => {
+    if (!draftKey) return;
+    try {
+      window.sessionStorage.setItem(draftKey, JSON.stringify({
+        input, selection: skillSelection, scope: skillScope,
+        overrideDirty: skillOverrideDirty, savedAt: Date.now(),
+      }));
+    } catch { /* Draft storage is optional when browser storage is unavailable. */ }
+  };
+
+  useEffect(() => {
+    if (!draftKey) return;
+    const timer = window.setTimeout(() => {
+      try {
+      const draft = parseChatDraft(window.sessionStorage.getItem(draftKey));
+      if (draft) {
+        setInput(draft.input);
+        setSkillSelection(draft.selection);
+        setSkillScope(draft.scope);
+        setSkillOverrideDirty(draft.overrideDirty);
+      }
+      window.sessionStorage.removeItem(draftKey);
+      } catch { /* Browsers may disable session storage. */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [draftKey]);
   const assistantName = initialAssistant?.name ?? "Dot";
   const turnCount = messages.filter((message) => message.role === "user").length;
   const turnNumbers = useMemo(() => {
@@ -509,17 +612,24 @@ export function ChatWorkspace({
     );
   };
 
-  const approvalRequestOptions = () => ({
+  const approvalRequestOptions = (message: UIMessage) => {
+    const parentGenerationId = getMessageSkillResolution(message)?.generationId;
+    if (persistenceEnabled && !parentGenerationId) {
+      throw new Error("此工具请求没有可恢复的执行记录，请重新发起任务。");
+    }
+    return {
     body: {
       modelId: selectedModelId,
       knowledgeBaseIds: selectedKnowledgeBaseIds,
       mcpSourceIds: selectedMcpSourceIds,
       conversationId: activeConversationId,
       branchId: activeBranchId,
-      idempotencyKey: crypto.randomUUID(),
+      idempotencyKey: createClientUuid(),
       reasoning: useDeepThinking ? "high" : "provider-default",
+      ...(parentGenerationId ? { continuation: { parentGenerationId } } : {}),
     },
-  });
+    };
+  };
 
   useEffect(() => {
     const textarea = composerTextareaRef.current;
@@ -529,6 +639,24 @@ export function ChatWorkspace({
     textarea.style.height = `${nextHeight}px`;
     textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
   }, [input]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const stored = JSON.parse(
+          window.localStorage.getItem(recentSkillsKey) ?? "[]",
+        ) as string[];
+        setRecentSkillVersionIds(
+          stored
+            .filter((id) => initialSkills.some((skill) => skill.versionId === id))
+            .slice(0, 6),
+        );
+      } catch {
+        window.localStorage.removeItem(recentSkillsKey);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialSkills, recentSkillsKey]);
 
   useEffect(() => {
     if (!isNearBottom && status !== "submitted") return;
@@ -584,44 +712,192 @@ export function ChatWorkspace({
         hasContextSummary: false,
         createdAt: new Date().toISOString(),
         messageCount: 0,
+        skillSelection: null,
+        skillSelectionRevision: 0,
       },
     ]);
+    setPersistedSkillSelection(DEFAULT_SKILL_SELECTION);
+    setSkillSelection(DEFAULT_SKILL_SELECTION);
+    setSkillRevision(0);
+    setSkillOverrideDirty(false);
     window.history.replaceState(null, "", `/chat/${conversation.id}`);
     return { conversationId: conversation.id, branchId: payload.conversation.branchId };
   };
 
+  const saveBranchSkillSelection = async (
+    selection: SkillSelection | null = skillSelection,
+    conversationId = activeConversationId,
+    branchId = activeBranchId,
+  ) => {
+    if (!conversationId || !branchId) return false;
+    setSkillSaving(true);
+    setCloudError(undefined);
+    try {
+      const response = await fetch(
+        `/api/conversations/${conversationId}/branches/${branchId}/skills`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expectedRevision: skillRevision, selection }),
+        },
+      );
+      const payload = (await response.json()) as {
+        code?: string;
+        message?: string;
+        selection?: SkillSelection;
+        savedSelection?: SkillSelection | null;
+        revision?: number;
+      };
+      if (!response.ok || !payload.selection || payload.revision === undefined) {
+        throw new Error(
+          payload.message ||
+            (payload.code === "SKILL_SELECTION_CONFLICT"
+              ? "Skill 配置已被其他窗口更新，请刷新后重试。"
+              : "Skill 配置保存失败。"),
+        );
+      }
+      setSkillRevision(payload.revision);
+      setPersistedSkillSelection(payload.selection);
+      setSkillSelection(payload.selection);
+      setSkillOverrideDirty(false);
+      setBranches((items) =>
+        items.map((branch) =>
+          branch.id === branchId
+            ? {
+                ...branch,
+                skillSelection: payload.savedSelection ?? null,
+                skillSelectionRevision: payload.revision!,
+              }
+            : branch,
+        ),
+      );
+      setSessionNotice(
+        selection ? "当前会话的 Skill 配置已保存。" : "已恢复助手或自动配置。",
+      );
+      return true;
+    } catch (saveError) {
+      setCloudError(
+        saveError instanceof Error ? saveError.message : "Skill 配置保存失败。",
+      );
+      return false;
+    } finally {
+      setSkillSaving(false);
+    }
+  };
+
   const submit = async (text = input) => {
-    const value = text.trim();
-    if (!value || isBusy) return;
+    const originalValue = text.trim();
+    const parsedTokens = parseSkillTokens(originalValue);
+    const value = parsedTokens.text;
+    if (!originalValue || isBusy || isAwaitingApproval) return;
     clearError();
     setCloudError(undefined);
     setIsNearBottom(true);
+    let sent = false;
 
     try {
+      let requestSkillSelection = skillSelection;
+      let hasMessageOverride = skillOverrideDirty;
+      if (parsedTokens.slugs.length > 0) {
+        const tokenSkills = parsedTokens.slugs.map((slug) =>
+          initialSkills.find(
+            (skill) =>
+              skill.slug === slug ||
+              skill.catalogId === slug ||
+              skill.slug.replace(/^(builtin|catalog)-/, "") === slug,
+          ),
+        );
+        const missingSlug = parsedTokens.slugs.find(
+          (_slug, index) => !tokenSkills[index],
+        );
+        if (missingSlug) {
+          throw new Error(
+            `未找到已安装的 Skill“${missingSlug}”，请从选择器中确认。`,
+          );
+        }
+        const refs = [...requestSkillSelection.refs];
+        for (const skill of tokenSkills) {
+          if (!skill) continue;
+          if (!refs.some((reference) => reference.versionId === skill.versionId)) {
+            refs.push({ skillId: skill.id, versionId: skill.versionId });
+          }
+        }
+        if (refs.length > 3) {
+          throw new Error("每次最多选择 3 个 Skill，请先移除一个再发送。");
+        }
+        requestSkillSelection = {
+          ...requestSkillSelection,
+          mode: "manual",
+          refs,
+        };
+        hasMessageOverride = true;
+        setSkillSelection(requestSkillSelection);
+      }
       const created =
         persistenceEnabled && !activeConversationId
           ? await createCloudConversation()
           : undefined;
       const conversationId = created?.conversationId ?? activeConversationId;
       const branchId = created?.branchId ?? activeBranchId;
+      if (created && hasMessageOverride) {
+        setSkillSelection(requestSkillSelection);
+        setSkillOverrideDirty(true);
+      }
 
+      if (skillScope === "branch" && hasMessageOverride) {
+        const saved = await saveBranchSkillSelection(
+          requestSkillSelection,
+          conversationId,
+          branchId,
+        );
+        if (!saved) return;
+        hasMessageOverride = false;
+      }
+      const body = {
+        modelId: selectedModelId,
+        knowledgeBaseIds: selectedKnowledgeBaseIds,
+        mcpSourceIds: selectedMcpSourceIds,
+        conversationId,
+        branchId,
+        reasoning: useDeepThinking ? "high" : "provider-default",
+        ...(hasMessageOverride ? { skillSelection: requestSkillSelection } : {}),
+      };
+      const intent = JSON.stringify({ text: originalValue, body });
+      const retry = retryRef.current?.intent === intent
+        ? retryRef.current
+        : { intent, key: createClientUuid(), messageId: createClientUuid() };
+      retryRef.current = retry;
+      sendErrorRef.current = null;
       await sendMessage(
-        { text: value },
         {
-          body: {
-            modelId: selectedModelId,
-            knowledgeBaseIds: selectedKnowledgeBaseIds,
-            mcpSourceIds: selectedMcpSourceIds,
-            conversationId,
-            branchId,
-            idempotencyKey: crypto.randomUUID(),
-            reasoning: useDeepThinking ? "high" : "provider-default",
-          },
+          id: retry.messageId,
+          role: "user",
+          parts: [{ type: "text", text: originalValue }],
+          ...(messages.some((message) => message.id === retry.messageId)
+            ? { messageId: retry.messageId } : {}),
+        },
+        {
+          body: { ...body, idempotencyKey: retry.key },
         },
       );
+      if (sendErrorRef.current) throw sendErrorRef.current;
+      retryRef.current = null;
+      sent = true;
+      if (requestSkillSelection.refs.length > 0) {
+        const recent = [
+          ...requestSkillSelection.refs.map((reference) => reference.versionId),
+          ...recentSkillVersionIds,
+        ].filter((id, index, items) => items.indexOf(id) === index).slice(0, 6);
+        setRecentSkillVersionIds(recent);
+        window.localStorage.setItem(recentSkillsKey, JSON.stringify(recent));
+      }
+      if (hasMessageOverride && skillScope === "message") {
+        setSkillSelection(persistedSkillSelection);
+        setSkillOverrideDirty(false);
+      }
       if (
         messages.length + 1 > 18 ||
-        estimatedContextCharacters + value.length > 28_000
+        estimatedContextCharacters + originalValue.length > 28_000
       ) {
         setContextCompacted(true);
       }
@@ -631,7 +907,7 @@ export function ChatWorkspace({
           if (!current) return items;
           const updated = {
             ...current,
-            title: current.title === "新对话" ? value.slice(0, 48) : current.title,
+            title: current.title === "新对话" ? (value || originalValue).slice(0, 48) : current.title,
             updatedAt: new Date().toISOString(),
           };
           return [updated, ...items.filter((item) => item.id !== conversationId)];
@@ -642,7 +918,7 @@ export function ChatWorkspace({
         submitError instanceof Error ? submitError.message : "消息发送失败。",
       );
     }
-    setInput("");
+    if (sent) setInput("");
   };
 
   const handleSubmit = (event: FormEvent) => {
@@ -651,6 +927,13 @@ export function ChatWorkspace({
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      skillPickerOpen &&
+      ["Enter", "ArrowDown", "ArrowUp", "Escape"].includes(event.key)
+    ) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submit();
@@ -695,6 +978,17 @@ export function ChatWorkspace({
       stop();
       setMessages(payload.messages);
       setActiveBranchId(branchId);
+      const nextBranch = payload.branches?.find(
+        (branch) => branch.id === branchId,
+      );
+      const nextSkillSelection =
+        nextBranch?.skillSelection ??
+        initialAssistant?.skillSelection ??
+        DEFAULT_SKILL_SELECTION;
+      setPersistedSkillSelection(nextSkillSelection);
+      setSkillSelection(nextSkillSelection);
+      setSkillRevision(nextBranch?.skillSelectionRevision ?? 0);
+      setSkillOverrideDirty(false);
       setContextCompacted(
         payload.branches?.find((branch) => branch.id === branchId)
           ?.hasContextSummary ?? false,
@@ -760,6 +1054,14 @@ export function ChatWorkspace({
       };
       setBranches((items) => [...items, payload.branch]);
       setActiveBranchId(payload.branch.id);
+      const forkSkillSelection =
+        payload.branch.skillSelection ??
+        initialAssistant?.skillSelection ??
+        DEFAULT_SKILL_SELECTION;
+      setPersistedSkillSelection(forkSkillSelection);
+      setSkillSelection(forkSkillSelection);
+      setSkillRevision(payload.branch.skillSelectionRevision);
+      setSkillOverrideDirty(false);
       window.history.replaceState(
         null,
         "",
@@ -773,7 +1075,7 @@ export function ChatWorkspace({
           mcpSourceIds: selectedMcpSourceIds,
           conversationId: activeConversationId,
           branchId: payload.branch.id,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createClientUuid(),
           reasoning: useDeepThinking ? "high" : "provider-default",
         },
       });
@@ -920,6 +1222,7 @@ export function ChatWorkspace({
           <button className="nav-row is-active"><MessageSquareText size={17} /> {t("对话")} <span>{conversationList.length || 1}</span></button>
           <Link className="nav-row" href="/notebooks"><BookOpen size={17} /> {t("研究空间")}</Link>
           <Link className="nav-row" href="/assistants"><Bot size={17} /> {t("助手")}</Link>
+          <Link className="nav-row" href={`/skills?returnTo=${encodeURIComponent(returnTo)}`} onClick={saveComposerDraft}><BookOpen size={17} /> Skills <span>{initialSkills.length}</span></Link>
           <Link className="nav-row" href="/knowledge"><Archive size={17} /> {t("知识库")} <span>{initialKnowledgeBases.length}</span></Link>
           <Link className="nav-row" href="/admin"><Settings2 size={17} /> {t("模型管理")}</Link>
         </nav>
@@ -1065,11 +1368,15 @@ export function ChatWorkspace({
                           key={`${message.id}-${partIndex}`}
                           part={toolPart}
                           onApproval={(approvalId, approved) => {
-                            void addToolApprovalResponse({
-                              id: approvalId,
-                              approved,
-                              options: approvalRequestOptions(),
-                            });
+                            try {
+                              void addToolApprovalResponse({
+                                id: approvalId,
+                                approved,
+                                options: approvalRequestOptions(message),
+                              });
+                            } catch (approvalError) {
+                              setCloudError(approvalError instanceof Error ? approvalError.message : "工具确认失败。");
+                            }
                           }}
                         />
                       );
@@ -1077,6 +1384,7 @@ export function ChatWorkspace({
                     {isBusy && messageIndex === messages.length - 1 && message.role === "assistant" && <span className="stream-caret" />}
                   </div>
                   <MessageKnowledgeSources message={message} />
+                  {message.role === "assistant" && message.id !== "dot-welcome" && !message.id.startsWith("assistant-welcome-") && <MessageSkillResolution message={message} />}
                   {message.role === "assistant" && message.id !== "dot-welcome" && (
                     <div className="message-actions">
                       <button onClick={() => navigator.clipboard.writeText(message.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n"))}><Copy size={14} /> {t("复制")}</button>
@@ -1114,15 +1422,43 @@ export function ChatWorkspace({
             <small>{useDeepThinking ? t("深度思考已开启 · 回答可能更慢") : contextCompacted ? t("已携带滚动摘要与最近消息") : t("自动携带当前会话上下文")}</small>
           </div>
           <form className="composer" onSubmit={handleSubmit}>
-            <textarea ref={composerTextareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={`${t("继续提问，或让{{name}}完善上面的结果…", { name: assistantName })}`} rows={1} aria-label={t("消息")} />
+            {skillSelection.refs.length > 0 && (
+              <div className="composer-skill-tags">
+                {skillSelection.refs.map((reference) => {
+                  const skill = initialSkills.find(
+                    (item) => item.versionId === reference.versionId,
+                  );
+                  return skill ? <button disabled={skillControlsLocked} key={reference.versionId} onClick={() => { setSkillSelection((current) => ({ ...current, mode: "manual", refs: current.refs.filter((item) => item.versionId !== reference.versionId) })); setSkillOverrideDirty(true); }} type="button"><BookOpen size={11} />{skill.name}<X size={11} /></button> : null;
+                })}
+              </div>
+            )}
+            <textarea ref={composerTextareaRef} value={input} onChange={(event) => { setInput(event.target.value); if (/(^|\s)\/skill\s*$/.test(event.target.value)) setSkillPickerOpen(true); }} onKeyDown={handleComposerKeyDown} placeholder={`${t("继续提问，或让{{name}}完善上面的结果…", { name: assistantName })}`} rows={1} aria-label={t("消息")} />
             <div className="composer-toolbar">
-              <div><button type="button" className={`tool-chip${useDeepThinking ? " is-active" : ""}`} disabled={!supportsDeepThinking} aria-pressed={useDeepThinking} title={supportsDeepThinking ? t("为下一次回答使用高强度推理") : t("当前模型不支持深度思考")} onClick={() => setDeepThinkingEnabled((enabled) => !enabled)}><Sparkles size={14} /> {t("深度思考")}</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> {t("知识库 {{count}}", { count: selectedKnowledgeBases.length })}</button>}</div>
+              <div><button type="button" className={`tool-chip${useDeepThinking ? " is-active" : ""}`} disabled={!supportsDeepThinking} aria-pressed={useDeepThinking} title={supportsDeepThinking ? t("为下一次回答使用高强度推理") : t("当前模型不支持深度思考")} onClick={() => setDeepThinkingEnabled((enabled) => !enabled)}><Sparkles size={14} /> {t("深度思考")}</button><button type="button" className={`tool-chip${skillSelection.refs.length > 0 || skillSelection.mode === "manual" ? " is-active" : ""}`} aria-expanded={skillPickerOpen} disabled={!persistenceEnabled || !explicitSkillsEnabled || skillControlsLocked} onClick={() => setSkillPickerOpen((open) => !open)}><BookOpen size={14} /> Skills {skillSelection.refs.length > 0 ? skillSelection.refs.length : skillSelection.mode === "auto" ? "自动" : ""}</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> {t("知识库 {{count}}", { count: selectedKnowledgeBases.length })}</button>}</div>
               {isBusy ? (
                 <button className="send-button stop-button" type="button" onClick={stop} aria-label={t("停止生成")}><Square size={14} fill="currentColor" /></button>
               ) : (
-                <button className="send-button" type="submit" disabled={!input.trim()} aria-label={t("发送消息")}><ArrowUp size={18} /></button>
+                <button className="send-button" type="submit" disabled={!input.trim() || isAwaitingApproval} aria-label={t("发送消息")}><ArrowUp size={18} /></button>
               )}
             </div>
+            <SkillPicker
+              open={skillPickerOpen && !skillControlsLocked && explicitSkillsEnabled}
+              libraryHref={`/skills?returnTo=${encodeURIComponent(returnTo)}`}
+              onNavigate={saveComposerDraft}
+              skills={initialSkills}
+              selection={skillSelection}
+              scope={skillScope}
+              availableMcpTemplateIds={availableMcpTemplateIds}
+              recentSkillVersionIds={recentSkillVersionIds}
+              canSaveBranch={Boolean(activeConversationId && activeBranchId)}
+              saving={skillSaving}
+              onOpenChange={setSkillPickerOpen}
+              onSelectionChange={(selection) => { setSkillSelection(selection); setSkillOverrideDirty(true); setInput((current) => current.replace(/(^|\s)\/skill\s*/g, "$1").trimStart()); }}
+              onScopeChange={setSkillScope}
+              onSaveBranch={() => void saveBranchSkillSelection()}
+              onRestoreInherited={() => void saveBranchSkillSelection(null)}
+              onRestoreDefault={() => { setSkillSelection(persistedSkillSelection); setSkillOverrideDirty(false); }}
+            />
           </form>
           <p>{t("Dot 可能会犯错。重要信息请核实。")}</p>
         </footer>

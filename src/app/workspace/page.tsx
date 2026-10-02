@@ -9,6 +9,9 @@ import { listConversations } from "@/server/chat/store";
 import { getWorkspaceContext, isPersistenceConfigured } from "@/server/db/workspace";
 import { listEnabledChatModels } from "@/server/providers/store";
 import { listKnowledgeBases } from "@/server/knowledge/store";
+import { listMcpSources } from "@/server/mcp/store";
+import { listSkills } from "@/server/skills/store";
+import { isExplicitSkillsEnabled } from "@/server/skills/config";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +27,15 @@ export default async function WorkspacePage() {
   const userName = clerkUser
     ? clerkUserToProfile(clerkUser).displayName
     : identity?.displayName;
-  const [conversationList, workspaceModels, knowledgeBases] = context
+  const [conversationList, workspaceModels, knowledgeBases, mcpSources, skills] = context
     ? await Promise.all([
         listConversations(context),
         listEnabledChatModels(context),
         listKnowledgeBases(context),
+        listMcpSources(context),
+        listSkills(context),
       ])
-    : [[], [], []];
+    : [[], [], [], [], []];
 
   return (
     <ChatWorkspace
@@ -44,9 +49,36 @@ export default async function WorkspacePage() {
           (!authConfigured || Boolean(identity)))
       }
       persistenceEnabled={Boolean(context)}
+      storageIdentity={context ? `${context.workspaceId}:${context.userId}` : undefined}
+      explicitSkillsEnabled={isExplicitSkillsEnabled()}
       initialUserName={userName}
       initialConversations={conversationList}
       initialKnowledgeBases={knowledgeBases}
+      initialMcpSources={mcpSources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        transport: source.transport,
+        enabled: source.enabled,
+        toolCount: source.tools.length,
+        templateId: source.templateId,
+      }))}
+      initialSkills={skills.flatMap((skill) =>
+        skill.versionId
+          ? [{
+              id: skill.id,
+              versionId: skill.versionId,
+              name: skill.name,
+              description: skill.description,
+              slug: skill.slug,
+              catalogId: skill.catalogId,
+              category: skill.category,
+              version: skill.version,
+              enabled: skill.enabled,
+              autoLoad: skill.autoLoad,
+              dependencies: skill.dependencies,
+            }]
+          : [],
+      )}
     />
   );
 }

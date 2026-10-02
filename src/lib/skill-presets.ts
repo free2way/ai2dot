@@ -1,4 +1,5 @@
 import type { SkillDocument } from "@/lib/skills";
+import type { SkillDependency } from "@/lib/skill-selection";
 
 export type BuiltInSkillPreset = SkillDocument & { id: string };
 
@@ -68,3 +69,211 @@ export const BUILT_IN_SKILL_PRESETS: BuiltInSkillPreset[] = [
 6. 默认只读；任何写入仓库、创建 Issue 或修改 PR 的动作都需要用户明确确认。`,
   },
 ];
+
+export type SkillCatalogEntry = BuiltInSkillPreset & {
+  category: "research" | "productivity" | "writing" | "learning";
+  author: string;
+  descriptionEn: string;
+  sourceUrl: string;
+  changeNotes: string;
+  estimatedInput: string;
+  estimatedOutput: string;
+  dependencies: SkillDependency[];
+  legacyInstalled: boolean;
+};
+
+const CATALOG_BASE_URL =
+  "https://github.com/free2way/ai2dot/tree/main/src/lib/skill-presets.ts";
+
+const catalogMetadata: Record<
+  string,
+  Omit<
+    SkillCatalogEntry,
+    keyof BuiltInSkillPreset | "author" | "sourceUrl" | "legacyInstalled"
+  >
+> = {
+  "web-research": {
+    category: "research",
+    descriptionEn: "Research current topics across independent web sources.",
+    changeNotes: "Initial curated workflow with source and date checks.",
+    estimatedInput: "800-1,800 tokens",
+    estimatedOutput: "600-1,500 tokens",
+    dependencies: [
+      {
+        capability: "web_search",
+        requirement: "required",
+        alternatives: ["exa", "tavily"],
+      },
+    ],
+  },
+  "source-verification": {
+    category: "research",
+    descriptionEn: "Verify claims, numbers, dates, and citations against evidence.",
+    changeNotes: "Initial claim-by-claim verification workflow.",
+    estimatedInput: "700-1,600 tokens",
+    estimatedOutput: "500-1,200 tokens",
+    dependencies: [
+      {
+        capability: "web_search",
+        requirement: "optional",
+        alternatives: ["exa", "tavily"],
+      },
+    ],
+  },
+  "technical-docs": {
+    category: "research",
+    descriptionEn: "Answer framework and API questions from versioned documentation.",
+    changeNotes: "Initial version-aware documentation workflow.",
+    estimatedInput: "700-1,500 tokens",
+    estimatedOutput: "500-1,200 tokens",
+    dependencies: [
+      {
+        capability: "technical_docs",
+        requirement: "required",
+        alternatives: ["context7"],
+      },
+    ],
+  },
+  "github-project-research": {
+    category: "research",
+    descriptionEn: "Inspect repositories, issues, pull requests, and project health.",
+    changeNotes: "Initial read-only repository research workflow.",
+    estimatedInput: "800-1,700 tokens",
+    estimatedOutput: "600-1,500 tokens",
+    dependencies: [
+      {
+        capability: "github_read",
+        requirement: "required",
+        alternatives: ["github"],
+      },
+    ],
+  },
+};
+
+const additionalCatalogSkills: BuiltInSkillPreset[] = [
+  {
+    id: "context-review",
+    name: "上下文整理",
+    description: "把当前对话中的决策、事实、分歧和待办整理为可继续执行的上下文。",
+    version: "1.0.0",
+    keywords: ["上下文", "整理", "决策", "待办", "context", "decisions"],
+    requiredMcp: [],
+    instructions: `# 上下文整理工作流
+
+1. 只基于本次提供的可用对话上下文，不补写没有出现的事实。
+2. 分别提取目标、已确认事实、关键决策、未决问题、风险与下一步行动。
+3. 对互相冲突的说法并列记录，标明仍需确认，不能擅自选择其中一个版本。
+4. 行动项应包含负责人、截止时间和验收结果；上下文没有提供时明确写“待确认”。
+5. 输出结构化 Markdown，先给简短摘要，再给可直接用于继续会话的上下文清单。`,
+  },
+  {
+    id: "meeting-actions",
+    name: "会议行动项",
+    description: "从会议记录中提取决定、负责人、期限、依赖和后续检查点。",
+    version: "1.0.0",
+    keywords: ["会议", "纪要", "行动项", "负责人", "meeting", "action items"],
+    requiredMcp: [],
+    instructions: `# 会议行动项工作流
+
+1. 区分讨论、提议、明确决定和行动项，不把开放讨论误写为最终决定。
+2. 每个行动项提取任务、负责人、截止时间、依赖和完成标准；缺失字段标记待确认。
+3. 合并重复任务，但保留不同负责人与不同期限之间的冲突。
+4. 单独列出需要会后确认的问题、被阻塞事项和下一次检查时间。
+5. 输出先给三行内会议结论，再给 Markdown 表格和按优先级排列的后续清单。`,
+  },
+  {
+    id: "document-brief",
+    name: "文档摘要",
+    description: "把长文档压缩为结论、证据、限制条件和可执行建议。",
+    version: "1.0.0",
+    keywords: ["文档", "摘要", "报告", "总结", "document", "brief"],
+    requiredMcp: [],
+    instructions: `# 文档摘要工作流
+
+1. 识别文档目的、目标读者、核心论点和主要证据，不只复述目录。
+2. 对数字、日期、定义和限制条件保留原始口径；无法从来源确认时不自行补全。
+3. 区分作者明确陈述、引用事实和你的推断，并指出可能影响结论的缺失信息。
+4. 提取用户可采取的行动、前置条件和风险，避免空泛建议。
+5. 输出包括执行摘要、关键知识点、证据与限制、建议行动和需要追问的问题。`,
+  },
+  {
+    id: "video-study",
+    name: "视频学习笔记",
+    description: "基于已提供字幕整理章节、知识点、术语、问题与复习卡片。",
+    version: "1.0.0",
+    keywords: ["视频", "字幕", "学习", "笔记", "video", "transcript"],
+    requiredMcp: [],
+    instructions: `# 视频学习笔记工作流
+
+1. 仅根据用户提供或知识库检索到的字幕与元数据处理，不声称观看了无法访问的视频。
+2. 按主题变化建立章节；有时间戳时保留，没有时间戳时不要编造。
+3. 为每章提取关键概念、定义、例子、论证链和容易误解的点。
+4. 对讲者观点与可验证事实做区分，标出需要外部核验的说法。
+5. 输出详细学习报告、术语表、复习问题、闪卡和可保存到知识库的 Markdown 摘要。`,
+  },
+];
+
+const additionalMetadata: Record<
+  string,
+  Omit<
+    SkillCatalogEntry,
+    keyof BuiltInSkillPreset | "author" | "sourceUrl" | "legacyInstalled"
+  >
+> = {
+  "context-review": {
+    category: "productivity",
+    descriptionEn: "Turn available conversation context into decisions and next actions.",
+    changeNotes: "Initial context synthesis workflow.",
+    estimatedInput: "500-1,200 tokens",
+    estimatedOutput: "400-1,000 tokens",
+    dependencies: [],
+  },
+  "meeting-actions": {
+    category: "productivity",
+    descriptionEn: "Extract accountable action items from meeting notes.",
+    changeNotes: "Initial meeting follow-up workflow.",
+    estimatedInput: "500-1,300 tokens",
+    estimatedOutput: "400-900 tokens",
+    dependencies: [],
+  },
+  "document-brief": {
+    category: "writing",
+    descriptionEn: "Create an evidence-aware brief from a long document.",
+    changeNotes: "Initial structured briefing workflow.",
+    estimatedInput: "700-1,600 tokens",
+    estimatedOutput: "500-1,200 tokens",
+    dependencies: [],
+  },
+  "video-study": {
+    category: "learning",
+    descriptionEn: "Convert supplied transcripts into detailed study notes.",
+    changeNotes: "Initial transcript-based learning workflow.",
+    estimatedInput: "700-1,700 tokens",
+    estimatedOutput: "600-1,500 tokens",
+    dependencies: [],
+  },
+};
+
+export const SKILL_CATALOG: SkillCatalogEntry[] = [
+  ...BUILT_IN_SKILL_PRESETS.map((skill) => ({
+    ...skill,
+    ...catalogMetadata[skill.id],
+    author: "AI2DOT",
+    sourceUrl: CATALOG_BASE_URL,
+    legacyInstalled: true,
+  })),
+  ...additionalCatalogSkills.map((skill) => ({
+    ...skill,
+    ...additionalMetadata[skill.id],
+    author: "AI2DOT",
+    sourceUrl: CATALOG_BASE_URL,
+    legacyInstalled: false,
+  })),
+];
+
+export function getSkillCatalogEntry(catalogId: string, version?: string) {
+  return SKILL_CATALOG.find(
+    (entry) =>
+      entry.id === catalogId && (!version || entry.version === version),
+  );
+}

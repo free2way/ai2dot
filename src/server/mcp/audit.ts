@@ -113,7 +113,9 @@ export async function recordApprovalResponses(
         .where(
           and(
             eq(mcpToolAuditLogs.workspaceId, context.workspaceId),
+            eq(mcpToolAuditLogs.userId, context.userId),
             eq(mcpToolAuditLogs.approvalId, toolPart.approval.id),
+            eq(mcpToolAuditLogs.status, "requested"),
           ),
         );
     }

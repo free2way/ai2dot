@@ -21,6 +21,16 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const assistant = await createAssistant(context, parsed.data);
-  return Response.json({ assistant }, { status: 201 });
+  try {
+    const assistant = await createAssistant(context, parsed.data);
+    return Response.json({ assistant }, { status: 201 });
+  } catch (error) {
+    return Response.json(
+      {
+        code: "ASSISTANT_SAVE_FAILED",
+        message: error instanceof Error ? error.message : "助手保存失败。",
+      },
+      { status: 400 },
+    );
+  }
 }

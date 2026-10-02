@@ -73,4 +73,49 @@ describe("POST /api/chat", () => {
       code: "INVALID_REQUEST",
     });
   });
+
+  it("returns the Skill-specific contract for malformed selections", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messages,
+          skillSelection: {
+            mode: "auto",
+            refs: [{ skillId: "not-a-uuid", versionId: "not-a-uuid" }],
+            contextTarget: "recent_messages",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "INVALID_SKILL_SELECTION",
+    });
+  });
+
+  it("does not silently ignore explicit Skills when the feature is disabled", async () => {
+    vi.stubEnv("AI2DOT_ENABLE_EXPLICIT_SKILLS", "false");
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messages,
+          skillSelection: {
+            mode: "manual",
+            refs: [],
+            contextTarget: "recent_messages",
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "SKILL_FEATURE_DISABLED",
+    });
+  });
 });

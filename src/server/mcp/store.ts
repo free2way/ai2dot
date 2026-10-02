@@ -7,6 +7,7 @@ import {
   classifyMcpToolRisk,
   type McpToolRisk,
 } from "@/lib/mcp-policy";
+import { MCP_PRESETS } from "@/lib/mcp-presets";
 import { getDb } from "@/server/db";
 import { mcpSources, type McpToolSummary } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
@@ -18,6 +19,7 @@ import {
 
 export type McpSourceSummary = {
   id: string;
+  templateId: string | null;
   name: string;
   description: string | null;
   transport: "http" | "sse";
@@ -39,6 +41,7 @@ export type ExposedMcpTool = {
 function toSummary(source: typeof mcpSources.$inferSelect): McpSourceSummary {
   return {
     id: source.id,
+    templateId: source.templateId,
     name: source.name,
     description: source.description,
     transport: source.transport,
@@ -87,9 +90,19 @@ export async function createMcpSource(
     transport: "http" | "sse";
     url: string;
     secret?: string;
+    templateId?: string;
   },
 ) {
   await assertSafeProviderBaseUrl(input.url);
+  if (input.templateId) {
+    const preset = MCP_PRESETS.find((item) => item.id === input.templateId);
+    if (
+      !preset?.url ||
+      preset.url.replace(/\/$/, "") !== input.url.replace(/\/$/, "")
+    ) {
+      throw new Error("MCP 模板标识与官方端点不匹配。");
+    }
+  }
   const encryptedSecret = input.secret
     ? await encryptProviderSecret(input.secret)
     : null;
@@ -97,6 +110,7 @@ export async function createMcpSource(
     .insert(mcpSources)
     .values({
       workspaceId: context.workspaceId,
+      templateId: input.templateId || null,
       name: input.name,
       description: input.description || null,
       transport: input.transport,

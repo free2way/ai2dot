@@ -24,6 +24,7 @@ import { listEnabledChatModels } from "@/server/providers/store";
 import { listKnowledgeBases } from "@/server/knowledge/store";
 import { listMcpSources } from "@/server/mcp/store";
 import { listSkills } from "@/server/skills/store";
+import { isExplicitSkillsEnabled } from "@/server/skills/config";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,9 @@ export default async function ConversationPage({
       signedIn
       gatewayEnabled={workspaceModels.length > 0 || isAiGatewayConfigured()}
       persistenceEnabled
+      key={id}
+      storageIdentity={`${context.workspaceId}:${context.userId}`}
+      explicitSkillsEnabled={isExplicitSkillsEnabled()}
       initialConversationId={id}
       initialBranchId={activeBranch.id}
       initialBranches={branches}
@@ -106,6 +110,7 @@ export default async function ConversationPage({
       initialAssistant={assistant ? {
         name: assistant.name,
         description: assistant.description,
+        skillSelection: assistant.skillSelection,
       } : undefined}
       initialKnowledgeBases={knowledgeBases}
       initialMcpSources={mcpSources.map((source) => ({
@@ -114,13 +119,20 @@ export default async function ConversationPage({
         transport: source.transport,
         enabled: source.enabled,
         toolCount: source.tools.length,
+        templateId: source.templateId,
       }))}
       initialSkills={skills.map((skill) => ({
         id: skill.id,
+        versionId: skill.versionId!,
         name: skill.name,
         description: skill.description,
+        slug: skill.slug,
+        catalogId: skill.catalogId,
+        category: skill.category,
+        version: skill.version,
         enabled: skill.enabled,
         autoLoad: skill.autoLoad,
+        dependencies: skill.dependencies,
       }))}
     />
   );
