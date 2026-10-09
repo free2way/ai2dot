@@ -15,7 +15,7 @@ describe("assistant helpers", () => {
     const result = assistantInputSchema.safeParse({
       name: "Oracle 专家",
       avatar: "OR",
-      systemPrompt: "生成安全的 Oracle 脚本。",
+      systemPrompt: "x",
       knowledgeBaseIds: [
         "00000000-0000-4000-8000-000000000001",
         "00000000-0000-4000-8000-000000000002",

@@ -11,7 +11,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("AssistantManager", () => {
-  it("opens with a useful Oracle assistant template", () => {
+  it("opens with a blank assistant instruction field", () => {
     render(
       <AssistantManager
         initialAssistants={[]}
@@ -25,7 +25,7 @@ describe("AssistantManager", () => {
     ).toBeInTheDocument();
     expect(
       (screen.getByLabelText("系统提示词") as HTMLTextAreaElement).value,
-    ).toContain("Oracle 数据库工程师");
+    ).toBe("");
     expect(screen.getByRole("button", { name: "开始对话" })).toBeEnabled();
   });
 });

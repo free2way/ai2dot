@@ -1,11 +1,11 @@
 import { defineConfig } from "drizzle-kit";
 
-// `generate` only reads the schema, so keep it usable before Neon is provisioned.
-// `migrate` still requires a real DATABASE_URL supplied by the operator.
+// Schema generation can run without a real database. Migrations still require
+// DATABASE_URL_UNPOOLED or DATABASE_URL supplied outside the repository.
 const databaseUrl =
   process.env.DATABASE_URL_UNPOOLED ||
   process.env.DATABASE_URL ||
-  "postgresql://schema-only:disabled@localhost/ai2dot";
+  "postgresql://placeholder.invalid/placeholder";
 
 export default defineConfig({
   dialect: "postgresql",

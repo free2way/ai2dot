@@ -34,6 +34,14 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Local-only agent instructions and internal planning documents
+AGENTS.md
+CLAUDE.md
+TECHNICAL_PLAN.md
+TECHNICAL_ACCEPTANCE_PLAN.md
+docs/development/
+docs/acceptance/
+
 # vercel
 .vercel
 
