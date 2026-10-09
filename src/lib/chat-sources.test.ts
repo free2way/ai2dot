@@ -17,6 +17,7 @@ describe("knowledge source parts", () => {
         knowledgeBaseName: "产品资料",
         content: "第一段",
         score: 0.9,
+        retrievalMode: "hybrid",
       },
       {
         chunkId: "chunk-2",
@@ -27,6 +28,7 @@ describe("knowledge source parts", () => {
         knowledgeBaseName: "产品资料",
         content: "第二段",
         score: 0.8,
+        retrievalMode: "semantic",
       },
     ]);
 

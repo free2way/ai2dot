@@ -1,5 +1,13 @@
 import { sql } from "drizzle-orm";
 import type { ConversationAssistantSnapshot } from "@/lib/assistants";
+import type {
+  SkillContextTarget,
+  SkillDependency,
+  SkillInvocationStatus,
+  SkillMode,
+  SkillResolution,
+  SkillSelection,
+} from "@/lib/skill-selection";
 import {
   boolean,
   index,
@@ -13,6 +21,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 export const workspaceRole = pgEnum("workspace_role", [
@@ -47,15 +56,81 @@ export const providerType = pgEnum("provider_type", [
   "native",
 ]);
 export const mcpTransport = pgEnum("mcp_transport", ["http", "sse"]);
+export const mcpToolRisk = pgEnum("mcp_tool_risk", [
+  "read",
+  "write",
+  "destructive",
+  "unknown",
+]);
+export const mcpToolAuditStatus = pgEnum("mcp_tool_audit_status", [
+  "requested",
+  "approved",
+  "denied",
+  "running",
+  "succeeded",
+  "failed",
+]);
 export const skillSourceType = pgEnum("skill_source_type", [
   "manual",
   "github",
   "url",
+  "builtin",
+]);
+export const skillMode = pgEnum("skill_mode", ["auto", "manual", "hybrid"]);
+export const skillContextTarget = pgEnum("skill_context_target", [
+  "current_message",
+  "recent_messages",
+  "conversation",
+]);
+export const skillInvocationStatus = pgEnum("skill_invocation_status", [
+  "resolved",
+  "included",
+  "omitted",
+  "blocked",
+  "awaiting_approval",
+  "completed",
+  "failed",
+  "stopped",
 ]);
 export const knowledgeDocumentStatus = pgEnum("knowledge_document_status", [
   "processing",
   "ready",
   "failed",
+]);
+export const knowledgeEmbeddingStatus = pgEnum("knowledge_embedding_status", [
+  "pending",
+  "processing",
+  "ready",
+  "failed",
+]);
+export const knowledgeEmbeddingJobStatus = pgEnum(
+  "knowledge_embedding_job_status",
+  ["pending", "running", "completed", "failed"],
+);
+export const notebookStatus = pgEnum("notebook_status", ["active", "archived"]);
+export const notebookArtifactType = pgEnum("notebook_artifact_type", [
+  "summary",
+  "faq",
+  "timeline",
+  "study_guide",
+  "mind_map",
+]);
+export const notebookArtifactStatus = pgEnum("notebook_artifact_status", [
+  "pending",
+  "running",
+  "ready",
+  "failed",
+]);
+export const userStatus = pgEnum("user_status", ["active", "suspended"]);
+export const platformAdminRole = pgEnum("platform_admin_role", [
+  "super_admin",
+  "operator",
+  "auditor",
+]);
+export const platformAdminStatus = pgEnum("platform_admin_status", [
+  "active",
+  "locked",
+  "disabled",
 ]);
 
 const timestamps = {
@@ -75,9 +150,87 @@ export const users = pgTable(
     displayName: text("display_name"),
     email: text("email"),
     avatarUrl: text("avatar_url"),
+    status: userStatus("status").notNull().default("active"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspendedReason: text("suspended_reason"),
     ...timestamps,
   },
-  (table) => [uniqueIndex("users_external_auth_id_idx").on(table.externalAuthId)],
+  (table) => [
+    uniqueIndex("users_external_auth_id_idx").on(table.externalAuthId),
+    index("users_status_updated_idx").on(table.status, table.updatedAt),
+    index("users_last_seen_idx").on(table.lastSeenAt),
+  ],
+);
+
+export const platformAdmins = pgTable(
+  "platform_admins",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: platformAdminRole("role").notNull().default("auditor"),
+    status: platformAdminStatus("status").notNull().default("active"),
+    failedLoginCount: integer("failed_login_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("platform_admins_username_idx").on(table.username),
+    index("platform_admins_status_idx").on(table.status),
+  ],
+);
+
+export const platformAdminSessions = pgTable(
+  "platform_admin_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    adminId: uuid("admin_id")
+      .notNull()
+      .references(() => platformAdmins.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_admin_sessions_token_idx").on(table.tokenHash),
+    index("platform_admin_sessions_admin_idx").on(table.adminId),
+    index("platform_admin_sessions_expires_idx").on(table.expiresAt),
+  ],
+);
+
+export const platformAdminAuditLogs = pgTable(
+  "platform_admin_audit_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    adminId: uuid("admin_id").references(() => platformAdmins.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("platform_admin_audit_created_idx").on(table.createdAt),
+    index("platform_admin_audit_admin_idx").on(table.adminId, table.createdAt),
+  ],
 );
 
 export const workspaces = pgTable("workspaces", {
@@ -127,6 +280,7 @@ export const providerConnections = pgTable(
 export type McpToolSummary = {
   name: string;
   description?: string;
+  risk: "read" | "write" | "destructive" | "unknown";
 };
 
 export const mcpSources = pgTable(
@@ -137,6 +291,7 @@ export const mcpSources = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    templateId: text("template_id"),
     description: text("description"),
     transport: mcpTransport("transport").notNull().default("http"),
     url: text("url").notNull(),
@@ -159,6 +314,11 @@ export const skills = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    catalogId: text("catalog_id"),
+    currentVersionId: uuid("current_version_id"),
+    category: text("category"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    policyRevision: integer("policy_revision").notNull().default(0),
     description: text("description").notNull(),
     version: text("version").notNull().default("1.0.0"),
     sourceType: skillSourceType("source_type").notNull().default("manual"),
@@ -173,7 +333,52 @@ export const skills = pgTable(
   },
   (table) => [
     uniqueIndex("skills_workspace_slug_idx").on(table.workspaceId, table.slug),
+    uniqueIndex("skills_workspace_catalog_idx")
+      .on(table.workspaceId, table.catalogId)
+      .where(sql`${table.catalogId} is not null`),
     index("skills_workspace_enabled_idx").on(table.workspaceId, table.enabled),
+  ],
+);
+
+export const skillVersions = pgTable(
+  "skill_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id),
+    version: text("version").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    instructions: text("instructions").notNull(),
+    keywords: jsonb("keywords").$type<string[]>().notNull().default([]),
+    dependencyManifest: jsonb("dependency_manifest")
+      .$type<SkillDependency[]>()
+      .notNull()
+      .default([]),
+    legacyRequiredMcp: jsonb("legacy_required_mcp")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    contentHash: text("content_hash").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    changeNotes: text("change_notes"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("skill_versions_skill_hash_idx").on(
+      table.skillId,
+      table.contentHash,
+    ),
+    index("skill_versions_skill_created_idx").on(
+      table.skillId,
+      table.createdAt,
+    ),
   ],
 );
 
@@ -218,9 +423,60 @@ export const assistants = pgTable(
     welcomeMessage: text("welcome_message"),
     defaultModelKey: text("default_model_key"),
     defaultModelId: uuid("default_model_id").references(() => models.id),
+    skillMode: skillMode("skill_mode").$type<SkillMode>().notNull().default("auto"),
+    skillContextTarget: skillContextTarget("skill_context_target")
+      .$type<SkillContextTarget>()
+      .notNull()
+      .default("recent_messages"),
     ...timestamps,
   },
   (table) => [index("assistants_workspace_idx").on(table.workspaceId)],
+);
+
+export const assistantSkills = pgTable(
+  "assistant_skills",
+  {
+    assistantId: uuid("assistant_id")
+      .notNull()
+      .references(() => assistants.id, { onDelete: "cascade" }),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id),
+    skillVersionId: uuid("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.assistantId, table.position] }),
+    uniqueIndex("assistant_skills_assistant_version_idx").on(
+      table.assistantId,
+      table.skillVersionId,
+    ),
+    index("assistant_skills_skill_idx").on(table.skillId),
+  ],
+);
+
+export const assistantMcpSources = pgTable(
+  "assistant_mcp_sources",
+  {
+    assistantId: uuid("assistant_id")
+      .notNull()
+      .references(() => assistants.id, { onDelete: "cascade" }),
+    mcpSourceId: uuid("mcp_source_id")
+      .notNull()
+      .references(() => mcpSources.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.assistantId, table.mcpSourceId] }),
+    index("assistant_mcp_sources_source_idx").on(table.mcpSourceId),
+  ],
 );
 
 export const knowledgeBases = pgTable(
@@ -269,6 +525,12 @@ export const knowledgeDocuments = pgTable(
     characterCount: integer("character_count").notNull().default(0),
     status: knowledgeDocumentStatus("status").notNull().default("processing"),
     errorMessage: text("error_message"),
+    embeddingStatus: knowledgeEmbeddingStatus("embedding_status")
+      .notNull()
+      .default("pending"),
+    embeddingModel: text("embedding_model"),
+    embeddedChunkCount: integer("embedded_chunk_count").notNull().default(0),
+    embeddingError: text("embedding_error"),
     ...timestamps,
   },
   (table) => [
@@ -292,6 +554,9 @@ export const knowledgeChunks = pgTable(
     chunkIndex: integer("chunk_index").notNull(),
     content: text("content").notNull(),
     tokenEstimate: integer("token_estimate").notNull().default(0),
+    embedding: vector("embedding", { dimensions: 1536 }),
+    embeddingModel: text("embedding_model"),
+    embeddedAt: timestamp("embedded_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -305,6 +570,156 @@ export const knowledgeChunks = pgTable(
     index("knowledge_chunks_content_trgm_idx").using(
       "gin",
       table.content.op("gin_trgm_ops"),
+    ),
+    index("knowledge_chunks_embedding_hnsw_idx").using(
+      "hnsw",
+      table.embedding.op("vector_cosine_ops"),
+    ),
+  ],
+);
+
+export const knowledgeEmbeddingJobs = pgTable(
+  "knowledge_embedding_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    knowledgeBaseId: uuid("knowledge_base_id")
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+    status: knowledgeEmbeddingJobStatus("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("knowledge_embedding_jobs_document_idx").on(table.documentId),
+    index("knowledge_embedding_jobs_claim_idx").on(
+      table.status,
+      table.availableAt,
+      table.createdAt,
+    ),
+    index("knowledge_embedding_jobs_workspace_idx").on(table.workspaceId),
+  ],
+);
+
+export const notebooks = pgTable(
+  "notebooks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    knowledgeBaseId: uuid("knowledge_base_id")
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: "cascade" }),
+    assistantId: uuid("assistant_id").references(() => assistants.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: notebookStatus("status").notNull().default("active"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notebooks_knowledge_base_idx").on(table.knowledgeBaseId),
+    index("notebooks_workspace_status_updated_idx").on(
+      table.workspaceId,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const notebookVideoSources = pgTable(
+  "notebook_video_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    notebookId: uuid("notebook_id")
+      .notNull()
+      .references(() => notebooks.id, { onDelete: "cascade" }),
+    knowledgeDocumentId: uuid("knowledge_document_id")
+      .notNull()
+      .references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    platform: text("platform").$type<"youtube" | "bilibili">().notNull(),
+    externalId: text("external_id").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    title: text("title").notNull(),
+    authorName: text("author_name"),
+    thumbnailUrl: text("thumbnail_url"),
+    durationSeconds: integer("duration_seconds"),
+    language: text("language"),
+    transcriptOrigin: text("transcript_origin")
+      .$type<"pasted" | "subtitle_upload">()
+      .notNull(),
+    rightsConfirmed: boolean("rights_confirmed").notNull().default(false),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("notebook_video_sources_document_idx").on(
+      table.knowledgeDocumentId,
+    ),
+    uniqueIndex("notebook_video_sources_external_idx").on(
+      table.notebookId,
+      table.platform,
+      table.externalId,
+    ),
+    index("notebook_video_sources_notebook_updated_idx").on(
+      table.notebookId,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const notebookArtifacts = pgTable(
+  "notebook_artifacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    notebookId: uuid("notebook_id")
+      .notNull()
+      .references(() => notebooks.id, { onDelete: "cascade" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: notebookArtifactType("type").notNull(),
+    title: text("title").notNull(),
+    contentMarkdown: text("content_markdown"),
+    structuredContent: jsonb("structured_content").$type<Record<string, unknown>>(),
+    status: notebookArtifactStatus("status").notNull().default("pending"),
+    modelId: text("model_id"),
+    sourceSnapshotHash: text("source_snapshot_hash"),
+    publishedDocumentId: uuid("published_document_id").references(
+      () => knowledgeDocuments.id,
+      { onDelete: "set null" },
+    ),
+    errorMessage: text("error_message"),
+    ...timestamps,
+  },
+  (table) => [
+    index("notebook_artifacts_notebook_created_idx").on(
+      table.notebookId,
+      table.createdAt,
+    ),
+    index("notebook_artifacts_status_updated_idx").on(
+      table.status,
+      table.updatedAt,
     ),
   ],
 );
@@ -322,6 +737,9 @@ export const conversations = pgTable(
     assistantId: uuid("assistant_id").references(() => assistants.id, {
       onDelete: "set null",
     }),
+    notebookId: uuid("notebook_id").references(() => notebooks.id, {
+      onDelete: "set null",
+    }),
     title: text("title").notNull().default("新对话"),
     summary: text("summary"),
     assistantSnapshot: jsonb("assistant_snapshot").$type<ConversationAssistantSnapshot>(),
@@ -332,6 +750,10 @@ export const conversations = pgTable(
     index("conversations_workspace_user_updated_idx").on(
       table.workspaceId,
       table.userId,
+      table.updatedAt,
+    ),
+    index("conversations_notebook_updated_idx").on(
+      table.notebookId,
       table.updatedAt,
     ),
   ],
@@ -352,6 +774,10 @@ export const conversationBranches = pgTable(
     summaryThroughClientMessageId: text(
       "summary_through_client_message_id",
     ),
+    skillSelection: jsonb("skill_selection").$type<SkillSelection>(),
+    skillSelectionRevision: integer("skill_selection_revision")
+      .notNull()
+      .default(0),
     ...timestamps,
   },
   (table) => [
@@ -415,6 +841,12 @@ export const generations = pgTable(
       onDelete: "set null",
     }),
     providerModelId: text("provider_model_id").notNull(),
+    skillResolution: jsonb("skill_resolution").$type<SkillResolution>(),
+    skillSelectionHash: text("skill_selection_hash"),
+    parentGenerationId: uuid("parent_generation_id"),
+    executionPlanVersion: integer("execution_plan_version")
+      .notNull()
+      .default(1),
     status: generationStatus("status").notNull().default("pending"),
     responseMessage: jsonb("response_message").$type<Record<string, unknown>>(),
     inputTokens: integer("input_tokens").notNull().default(0),
@@ -431,12 +863,67 @@ export const generations = pgTable(
       table.workspaceId,
       table.idempotencyKey,
     ),
+    uniqueIndex("generations_parent_continuation_idx")
+      .on(table.parentGenerationId)
+      .where(sql`${table.parentGenerationId} is not null`),
     index("generations_conversation_created_idx").on(
       table.conversationId,
       table.createdAt,
     ),
     index("generations_status_updated_idx").on(table.status, table.updatedAt),
     index("generations_model_created_idx").on(table.modelId, table.createdAt),
+  ],
+);
+
+export const generationSkillInvocations = pgTable(
+  "generation_skill_invocations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    generationId: uuid("generation_id")
+      .notNull()
+      .references(() => generations.id, { onDelete: "cascade" }),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    skillId: uuid("skill_id")
+      .notNull()
+      .references(() => skills.id),
+    skillVersionId: uuid("skill_version_id")
+      .notNull()
+      .references(() => skillVersions.id),
+    position: integer("position").notNull(),
+    trigger: text("trigger").notNull(),
+    snapshot: jsonb("snapshot_json")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    status: skillInvocationStatus("status")
+      .$type<SkillInvocationStatus>()
+      .notNull()
+      .default("resolved"),
+    statusReason: text("status_reason"),
+    contextTarget: skillContextTarget("context_target")
+      .$type<SkillContextTarget>()
+      .notNull(),
+    estimatedInputTokens: integer("estimated_input_tokens").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("generation_skill_invocations_position_idx").on(
+      table.generationId,
+      table.position,
+    ),
+    index("generation_skill_invocations_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
   ],
 );
 
@@ -469,6 +956,57 @@ export const usageEvents = pgTable(
     uniqueIndex("usage_events_request_id_idx").on(table.requestId),
     index("usage_events_workspace_created_idx").on(
       table.workspaceId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const mcpToolAuditLogs = pgTable(
+  "mcp_tool_audit_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
+    generationId: uuid("generation_id").references(() => generations.id, {
+      onDelete: "set null",
+    }),
+    mcpSourceId: uuid("mcp_source_id").references(() => mcpSources.id, {
+      onDelete: "set null",
+    }),
+    approvalId: text("approval_id"),
+    toolCallId: text("tool_call_id").notNull(),
+    toolName: text("tool_name").notNull(),
+    risk: mcpToolRisk("risk").notNull().default("unknown"),
+    status: mcpToolAuditStatus("status").notNull().default("requested"),
+    input: jsonb("input").$type<unknown>(),
+    outputSummary: text("output_summary"),
+    errorMessage: text("error_message"),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mcp_tool_audit_workspace_call_idx").on(
+      table.workspaceId,
+      table.toolCallId,
+    ),
+    uniqueIndex("mcp_tool_audit_approval_idx").on(table.approvalId),
+    index("mcp_tool_audit_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    index("mcp_tool_audit_conversation_created_idx").on(
+      table.conversationId,
       table.createdAt,
     ),
   ],

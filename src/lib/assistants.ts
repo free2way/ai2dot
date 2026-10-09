@@ -1,3 +1,8 @@
+import {
+  DEFAULT_SKILL_SELECTION,
+  type SkillSelection,
+} from "@/lib/skill-selection";
+
 export type AssistantSummary = {
   id: string;
   name: string;
@@ -7,6 +12,8 @@ export type AssistantSummary = {
   welcomeMessage: string | null;
   defaultModelKey: string | null;
   knowledgeBaseIds: string[];
+  mcpSourceIds: string[];
+  skillSelection: SkillSelection;
   updatedAt: string;
 };
 
@@ -18,6 +25,8 @@ export type AssistantInput = {
   welcomeMessage?: string;
   defaultModelKey?: string;
   knowledgeBaseIds: string[];
+  mcpSourceIds: string[];
+  skillSelection: SkillSelection;
 };
 
 export type ConversationAssistantSnapshot = {
@@ -29,6 +38,8 @@ export type ConversationAssistantSnapshot = {
   welcomeMessage: string | null;
   defaultModelKey: string | null;
   knowledgeBaseIds: string[];
+  mcpSourceIds: string[];
+  skillSelection: SkillSelection;
 };
 
 export const ORACLE_ASSISTANT_TEMPLATE: AssistantInput = {
@@ -41,6 +52,8 @@ export const ORACLE_ASSISTANT_TEMPLATE: AssistantInput = {
   welcomeMessage: "告诉我 Oracle 版本、目标表结构和你希望脚本完成的任务。",
   defaultModelKey: "",
   knowledgeBaseIds: [],
+  mcpSourceIds: [],
+  skillSelection: DEFAULT_SKILL_SELECTION,
 };
 
 export function normalizeAssistantAvatar(value: string, name: string) {

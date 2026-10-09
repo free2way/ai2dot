@@ -2,7 +2,12 @@ import "server-only";
 
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import type { ToolSet } from "ai";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import {
+  classifyMcpToolRisk,
+  type McpToolRisk,
+} from "@/lib/mcp-policy";
+import { MCP_PRESETS } from "@/lib/mcp-presets";
 import { getDb } from "@/server/db";
 import { mcpSources, type McpToolSummary } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
@@ -14,6 +19,7 @@ import {
 
 export type McpSourceSummary = {
   id: string;
+  templateId: string | null;
   name: string;
   description: string | null;
   transport: "http" | "sse";
@@ -25,16 +31,27 @@ export type McpSourceSummary = {
   lastError: string | null;
 };
 
+export type ExposedMcpTool = {
+  sourceId: string;
+  sourceName: string;
+  originalName: string;
+  risk: McpToolRisk;
+};
+
 function toSummary(source: typeof mcpSources.$inferSelect): McpSourceSummary {
   return {
     id: source.id,
+    templateId: source.templateId,
     name: source.name,
     description: source.description,
     transport: source.transport,
     url: source.url,
     enabled: source.enabled,
     secretConfigured: Boolean(source.encryptedSecret),
-    tools: source.tools ?? [],
+    tools: (source.tools ?? []).map((tool) => ({
+      ...tool,
+      risk: tool.risk ?? "unknown",
+    })),
     lastSyncedAt: source.lastSyncedAt,
     lastError: source.lastError,
   };
@@ -73,9 +90,19 @@ export async function createMcpSource(
     transport: "http" | "sse";
     url: string;
     secret?: string;
+    templateId?: string;
   },
 ) {
   await assertSafeProviderBaseUrl(input.url);
+  if (input.templateId) {
+    const preset = MCP_PRESETS.find((item) => item.id === input.templateId);
+    if (
+      !preset?.url ||
+      preset.url.replace(/\/$/, "") !== input.url.replace(/\/$/, "")
+    ) {
+      throw new Error("MCP 模板标识与官方端点不匹配。");
+    }
+  }
   const encryptedSecret = input.secret
     ? await encryptProviderSecret(input.secret)
     : null;
@@ -83,6 +110,7 @@ export async function createMcpSource(
     .insert(mcpSources)
     .values({
       workspaceId: context.workspaceId,
+      templateId: input.templateId || null,
       name: input.name,
       description: input.description || null,
       transport: input.transport,
@@ -177,6 +205,7 @@ export async function syncMcpSource(
     const tools: McpToolSummary[] = listed.tools.map((tool) => ({
       name: tool.name,
       ...(tool.description ? { description: tool.description } : {}),
+      risk: classifyMcpToolRisk(tool.annotations),
     }));
     const [updated] = await getDb()
       .update(mcpSources)
@@ -200,7 +229,18 @@ export async function syncMcpSource(
  * Creates one short-lived client per source so MCP tool calls stay isolated
  * by workspace and do not leak credentials across requests.
  */
-export async function getEnabledMcpTools(context: WorkspaceContext) {
+export async function getEnabledMcpTools(
+  context: WorkspaceContext,
+  allowedSourceIds: string[],
+) {
+  const uniqueSourceIds = [...new Set(allowedSourceIds)].slice(0, 10);
+  if (uniqueSourceIds.length === 0) {
+    return {
+      tools: {} as ToolSet,
+      metadata: new Map<string, ExposedMcpTool>(),
+      close: async () => undefined,
+    };
+  }
   const sources = await getDb()
     .select()
     .from(mcpSources)
@@ -208,31 +248,48 @@ export async function getEnabledMcpTools(context: WorkspaceContext) {
       and(
         eq(mcpSources.workspaceId, context.workspaceId),
         eq(mcpSources.enabled, true),
+        inArray(mcpSources.id, uniqueSourceIds),
       ),
     );
   const clients: MCPClient[] = [];
   const toolSets: ToolSet = {};
+  const metadata = new Map<string, ExposedMcpTool>();
 
-  for (const source of sources) {
+  const connected = await Promise.all(sources.map(async (source) => {
     let client: MCPClient | undefined;
     try {
       client = await connectSource(source);
       const tools = await client.tools();
-      clients.push(client);
-      for (const [name, tool] of Object.entries(tools)) {
-        toolSets[
-          `mcp_${source.id.replaceAll("-", "").slice(0, 8)}_${name}`
-        ] = tool as ToolSet[string];
-      }
+      return { source, client, tools };
     } catch (error) {
       // A single unavailable source should not take down ordinary chat.
       console.warn("[mcp] source unavailable", source.id, error);
       await client?.close().catch(() => undefined);
+      return null;
+    }
+  }));
+
+  for (const item of connected) {
+    if (!item) continue;
+    clients.push(item.client);
+    for (const [name, tool] of Object.entries(item.tools)) {
+      const exposedName = `mcp_${item.source.id.replaceAll("-", "").slice(0, 8)}_${name}`;
+      const summary = (item.source.tools ?? []).find(
+        (candidate) => candidate.name === name,
+      );
+      toolSets[exposedName] = tool as ToolSet[string];
+      metadata.set(exposedName, {
+        sourceId: item.source.id,
+        sourceName: item.source.name,
+        originalName: name,
+        risk: summary?.risk ?? "unknown",
+      });
     }
   }
 
   return {
     tools: toolSets,
+    metadata,
     close: async () => {
       await Promise.all(clients.map((client) => client.close().catch(() => undefined)));
     },

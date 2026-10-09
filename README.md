@@ -25,6 +25,7 @@ npm run db:migrate
 - `/admin`：工作区连接和外部来源管理
 - `/knowledge`：知识库管理
 - `/assistants`：助手管理
+- `/notebooks`：研究工作区
 
 ## 安全使用
 

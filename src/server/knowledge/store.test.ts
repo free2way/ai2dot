@@ -4,6 +4,7 @@ import {
   scoreKnowledgeText,
   splitKnowledgeText,
 } from "./store";
+import { rerankHybridKnowledgeResults } from "@/lib/knowledge-retrieval";
 
 describe("knowledge text processing", () => {
   it("splits long text into overlapping, bounded chunks", () => {
@@ -41,5 +42,32 @@ describe("knowledge text processing", () => {
 
     expect(ranked.filter((result) => result.documentId === "doc-a")).toHaveLength(2);
     expect(ranked.some((result) => result.documentId === "doc-b")).toBe(true);
+  });
+
+  it("fuses semantic and keyword candidates while rewarding overlap", () => {
+    const common = {
+      documentId: "doc-a",
+      documentName: "产品说明",
+      mimeType: "text/markdown",
+      knowledgeBaseId: "base-1",
+      knowledgeBaseName: "产品资料",
+    };
+    const results = rerankHybridKnowledgeResults(
+      [
+        { ...common, chunkId: "both", content: "部署方式", keywordScore: 0.8 },
+        { ...common, chunkId: "keyword", content: "部署命令", keywordScore: 0.7 },
+      ],
+      [
+        { ...common, chunkId: "both", content: "部署方式", semanticScore: 0.86 },
+        { ...common, chunkId: "semantic", content: "上线流程", semanticScore: 0.82 },
+      ],
+      3,
+    );
+
+    expect(results[0]).toMatchObject({
+      chunkId: "both",
+      retrievalMode: "hybrid",
+    });
+    expect(results.some((result) => result.retrievalMode === "semantic")).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "./schema";
 
 function createDb() {
@@ -9,7 +9,18 @@ function createDb() {
     throw new Error("DATABASE_URL is not configured.");
   }
 
-  return drizzle(neon(connectionString), { schema });
+  const configuredPoolSize = Number(process.env.DATABASE_POOL_MAX);
+  const max = Number.isInteger(configuredPoolSize)
+    ? Math.min(Math.max(configuredPoolSize, 1), 50)
+    : 10;
+  const client = postgres(connectionString, {
+    max,
+    idle_timeout: 20,
+    connect_timeout: 10,
+    prepare: false,
+  });
+
+  return drizzle(client, { schema });
 }
 
 let database: ReturnType<typeof createDb> | null = null;

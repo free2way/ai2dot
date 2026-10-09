@@ -4,6 +4,7 @@ export type KnowledgeBaseSummary = {
   description: string;
   documentCount: number;
   chunkCount: number;
+  semanticChunkCount: number;
   updatedAt: string;
 };
 
@@ -17,6 +18,10 @@ export type KnowledgeDocumentSummary = {
   chunkCount: number;
   status: "processing" | "ready" | "failed";
   errorMessage: string | null;
+  embeddingStatus: "pending" | "processing" | "ready" | "failed";
+  embeddingModel: string | null;
+  embeddedChunkCount: number;
+  embeddingError: string | null;
   updatedAt: string;
 };
 
@@ -29,4 +34,7 @@ export type KnowledgeSearchResult = {
   knowledgeBaseName: string;
   content: string;
   score: number;
+  retrievalMode: "keyword" | "semantic" | "hybrid";
+  keywordScore?: number;
+  semanticScore?: number;
 };

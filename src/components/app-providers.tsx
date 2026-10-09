@@ -1,17 +1,22 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import { isClerkConfigured } from "@/server/auth/config";
-import { LanguageProvider } from "@/lib/i18n";
+import { LanguageProvider } from "@/lib/language-context";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
+  const content = <LanguageProvider>{children}</LanguageProvider>;
+
   if (!isClerkConfigured()) {
-    return <LanguageProvider>{children}</LanguageProvider>;
+    return content;
   }
 
   return (
-    <LanguageProvider>
-      <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
-        {children}
-      </ClerkProvider>
-    </LanguageProvider>
+    <ClerkProvider
+      signInFallbackRedirectUrl="/workspace"
+      signInUrl="/sign-in"
+      signUpFallbackRedirectUrl="/workspace"
+      signUpUrl="/sign-up"
+    >
+      {content}
+    </ClerkProvider>
   );
 }

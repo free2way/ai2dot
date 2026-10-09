@@ -12,8 +12,9 @@ import {
   indexKnowledgeDocument,
 } from "@/server/knowledge/store";
 import { logServerEvent } from "@/server/observability/log";
+import { processKnowledgeEmbeddingJobs } from "@/server/knowledge/embedding-jobs";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(
   request: Request,
@@ -93,6 +94,18 @@ export async function POST(
           documentId: document.id,
           mimeType,
           chunkCount: indexed.chunkCount,
+          latencyMs: Date.now() - startedAt,
+        });
+        const embeddingResult = await processKnowledgeEmbeddingJobs({
+          maxJobs: 1,
+          maxChunksPerJob: 512,
+          preferredDocumentId: document.id,
+        });
+        logServerEvent("info", "knowledge.document_embedded", {
+          workspaceId: context.workspaceId,
+          knowledgeBaseId: id,
+          documentId: document.id,
+          ...embeddingResult,
           latencyMs: Date.now() - startedAt,
         });
       } catch (error) {

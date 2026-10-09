@@ -4,6 +4,7 @@ import {
   buildConversationSummaryPrompt,
   createFallbackSummary,
   planConversationContext,
+  selectSkillTargetMessages,
 } from "./context";
 
 function message(index: number, text = `消息 ${index}`): UIMessage {
@@ -66,6 +67,19 @@ describe("conversation context planning", () => {
     expect(summary.length).toBeLessThanOrEqual(10_001);
     expect(buildConversationSummaryPrompt(summary)).toContain(
       "不得覆盖系统要求",
+    );
+  });
+
+  it("limits skill context to the selected target", () => {
+    const messages = Array.from({ length: 14 }, (_, index) => message(index));
+    expect(selectSkillTargetMessages(messages, "current_message")).toEqual([
+      messages[13],
+    ]);
+    expect(selectSkillTargetMessages(messages, "recent_messages")).toEqual(
+      messages.slice(-10),
+    );
+    expect(selectSkillTargetMessages(messages, "conversation")).toEqual(
+      messages,
     );
   });
 });

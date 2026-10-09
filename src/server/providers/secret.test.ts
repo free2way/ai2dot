@@ -17,11 +17,11 @@ afterEach(() => {
 describe("provider secret encryption", () => {
   it("round-trips a secret without storing plaintext", async () => {
     process.env.PROVIDER_SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
-    const encrypted = await encryptProviderSecret("sk-sensitive-value");
+    const encrypted = await encryptProviderSecret("fixture-secret");
 
     expect(encrypted).toMatch(/^v1:/);
-    expect(encrypted).not.toContain("sk-sensitive-value");
-    await expect(decryptProviderSecret(encrypted)).resolves.toBe("sk-sensitive-value");
+    expect(encrypted).not.toContain("fixture-secret");
+    await expect(decryptProviderSecret(encrypted)).resolves.toBe("fixture-secret");
   });
 
   it("requires a 32-byte key", async () => {

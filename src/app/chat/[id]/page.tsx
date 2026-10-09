@@ -2,7 +2,12 @@ import { notFound, redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
 import { FEATURED_MODELS } from "@/lib/models";
-import { isClerkConfigured } from "@/server/auth/config";
+import {
+  getAuthMode,
+  isAuthConfigured,
+  isClerkConfigured,
+} from "@/server/auth/config";
+import { getRequestIdentity } from "@/server/auth/session";
 import { isAiGatewayConfigured } from "@/server/ai/gateway";
 import { getAssistant } from "@/server/assistants/store";
 import {
@@ -19,6 +24,9 @@ import { listEnabledChatModels } from "@/server/providers/store";
 import { listKnowledgeBases } from "@/server/knowledge/store";
 import { listMcpSources } from "@/server/mcp/store";
 import { listSkills } from "@/server/skills/store";
+import { isExplicitSkillsEnabled } from "@/server/skills/config";
+
+export const dynamic = "force-dynamic";
 
 export default async function ConversationPage({
   params,
@@ -27,10 +35,11 @@ export default async function ConversationPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ branch?: string }>;
 }) {
-  if (!isClerkConfigured() || !isPersistenceConfigured()) redirect("/");
+  if (!isAuthConfigured() || !isPersistenceConfigured()) redirect("/");
 
   const context = await getWorkspaceContext();
   if (!context) redirect("/sign-in");
+  const requestIdentity = await getRequestIdentity();
 
   const { id } = await params;
   const [conversation, branches] = await Promise.all([
@@ -52,7 +61,7 @@ export default async function ConversationPage({
     conversation.assistantId
       ? getAssistant(context, conversation.assistantId)
       : Promise.resolve(null),
-    currentUser(),
+    isClerkConfigured() ? currentUser() : Promise.resolve(null),
     listMcpSources(context),
     listSkills(context),
   ]);
@@ -81,20 +90,27 @@ export default async function ConversationPage({
     <ChatWorkspace
       models={workspaceModels.length > 0 ? workspaceModels : FEATURED_MODELS}
       authEnabled
+      authProvider={getAuthMode()}
+      signedIn
       gatewayEnabled={workspaceModels.length > 0 || isAiGatewayConfigured()}
       persistenceEnabled
+      key={id}
+      storageIdentity={`${context.workspaceId}:${context.userId}`}
+      explicitSkillsEnabled={isExplicitSkillsEnabled()}
       initialConversationId={id}
       initialBranchId={activeBranch.id}
       initialBranches={branches}
       initialContextCompacted={activeBranch.hasContextSummary}
       initialMessages={initialMessages}
       initialConversations={conversationList}
-      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || null}
+      initialUserName={user?.firstName || user?.username || user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || requestIdentity?.displayName || null}
       initialModelId={assistant?.defaultModelKey ?? undefined}
       initialKnowledgeBaseIds={assistant?.knowledgeBaseIds ?? []}
+      initialMcpSourceIds={assistant?.mcpSourceIds ?? []}
       initialAssistant={assistant ? {
         name: assistant.name,
         description: assistant.description,
+        skillSelection: assistant.skillSelection,
       } : undefined}
       initialKnowledgeBases={knowledgeBases}
       initialMcpSources={mcpSources.map((source) => ({
@@ -103,13 +119,20 @@ export default async function ConversationPage({
         transport: source.transport,
         enabled: source.enabled,
         toolCount: source.tools.length,
+        templateId: source.templateId,
       }))}
       initialSkills={skills.map((skill) => ({
         id: skill.id,
+        versionId: skill.versionId!,
         name: skill.name,
         description: skill.description,
+        slug: skill.slug,
+        catalogId: skill.catalogId,
+        category: skill.category,
+        version: skill.version,
         enabled: skill.enabled,
         autoLoad: skill.autoLoad,
+        dependencies: skill.dependencies,
       }))}
     />
   );

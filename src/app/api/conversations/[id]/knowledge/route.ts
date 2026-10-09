@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { z } from "zod";
 import { conversationToKnowledgeText } from "@/lib/conversations";
 import {
@@ -5,7 +6,10 @@ import {
   loadConversationMessages,
 } from "@/server/chat/store";
 import { getWorkspaceContext } from "@/server/db/workspace";
+import { processKnowledgeEmbeddingJobs } from "@/server/knowledge/embedding-jobs";
 import { addKnowledgeDocument } from "@/server/knowledge/store";
+
+export const maxDuration = 300;
 
 const saveSchema = z.object({
   knowledgeBaseId: z.string().uuid(),
@@ -65,6 +69,13 @@ export async function POST(
         { status: 404 },
       );
     }
+    after(() =>
+      processKnowledgeEmbeddingJobs({
+        maxJobs: 1,
+        maxChunksPerJob: 512,
+        preferredDocumentId: document.id,
+      }),
+    );
     return Response.json({ document }, { status: 201 });
   } catch (error) {
     return Response.json(

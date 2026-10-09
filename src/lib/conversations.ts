@@ -15,6 +15,8 @@ export type ConversationBranch = {
   hasContextSummary: boolean;
   createdAt: string;
   messageCount: number;
+  skillSelection: SkillSelection | null;
+  skillSelectionRevision: number;
 };
 
 export function filterConversations(
@@ -54,3 +56,4 @@ export function conversationToKnowledgeText(
 
   return [`# ${title}`, ...turns].join("\n\n");
 }
+import type { SkillSelection } from "@/lib/skill-selection";

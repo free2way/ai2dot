@@ -16,9 +16,19 @@ export async function PATCH(
     return Response.json({ message: "助手配置不正确。" }, { status: 400 });
   }
   const { id } = await params;
-  const assistant = await updateAssistant(context, id, parsed.data);
-  if (!assistant) return Response.json({ message: "助手不存在。" }, { status: 404 });
-  return Response.json({ assistant });
+  try {
+    const assistant = await updateAssistant(context, id, parsed.data);
+    if (!assistant) return Response.json({ message: "助手不存在。" }, { status: 404 });
+    return Response.json({ assistant });
+  } catch (error) {
+    return Response.json(
+      {
+        code: "ASSISTANT_SAVE_FAILED",
+        message: error instanceof Error ? error.message : "助手保存失败。",
+      },
+      { status: 400 },
+    );
+  }
 }
 
 export async function DELETE(

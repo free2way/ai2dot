@@ -18,6 +18,7 @@ export type SkillSummary = {
   description: string;
   version: string;
   sourceUrl: string | null;
+  builtIn: boolean;
   enabled: boolean;
   autoLoad: boolean;
   keywords: string[];
@@ -205,13 +206,13 @@ export function SkillManager({
         <div className="skill-list">
           {skills.map((skill) => (
             <div className="skill-row" key={skill.id}>
-              <div className="skill-main"><i data-enabled={skill.enabled} /><div><strong>{skill.name}</strong><small>v{skill.version} · {skill.sourceUrl || "工作区 Skill"}</small><p>{skill.description}</p></div></div>
+              <div className="skill-main"><i data-enabled={skill.enabled} /><div><strong>{skill.name}</strong><small>v{skill.version} · {skill.builtIn ? "内置工作流" : skill.sourceUrl || "工作区 Skill"}</small><p>{skill.description}</p></div></div>
               <div className="skill-meta"><span>{skill.keywords.length ? skill.keywords.slice(0, 3).join(" · ") : "无关键词"}</span>{skill.autoLoad ? <em>自动加载</em> : <small>手动匹配</small>}</div>
               <div className="skill-actions">
                 <button title={skill.enabled ? "停用 Skill" : "启用 Skill"} disabled={Boolean(busyId)} onClick={() => void toggleSkill(skill, "enabled")}><span className="mcp-toggle" data-active={skill.enabled}><span /></span></button>
                 <button title={skill.autoLoad ? "关闭自动加载" : "开启自动加载"} disabled={Boolean(busyId)} onClick={() => void toggleSkill(skill, "autoLoad")}><Check size={14} /></button>
-                <button title="修改 Skill" disabled={Boolean(busyId)} onClick={() => void openEdit(skill)}><Pencil size={14} /></button>
-                <button className="is-danger" title="删除 Skill" disabled={Boolean(busyId)} onClick={() => void deleteSkill(skill)}><Trash2 size={14} /></button>
+                {!skill.builtIn && <button title="修改 Skill" disabled={Boolean(busyId)} onClick={() => void openEdit(skill)}><Pencil size={14} /></button>}
+                {!skill.builtIn && <button className="is-danger" title="删除 Skill" disabled={Boolean(busyId)} onClick={() => void deleteSkill(skill)}><Trash2 size={14} /></button>}
               </div>
             </div>
           ))}
