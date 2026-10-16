@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { chatDraftKey } from "@/lib/chat-draft";
 import { FEATURED_MODELS } from "@/lib/models";
@@ -33,7 +33,7 @@ beforeEach(() => {
   localStorage.clear(); sessionStorage.clear();
   HTMLElement.prototype.scrollTo = vi.fn();
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("Chat workspace recovery", () => {
   it("keeps the selected conversation scope when editing context or mode", () => {
@@ -83,5 +83,52 @@ describe("Chat workspace recovery", () => {
     expect(mocks.send.mock.calls[0][1].body.skillSelection).toEqual({
       mode: "manual", refs: [], contextTarget: "conversation",
     });
+  });
+
+  it("adds browser speech recognition results to the composer", async () => {
+    class FakeSpeechRecognition {
+      static latest: FakeSpeechRecognition;
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      onstart: (() => void) | null = null;
+      onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onend: (() => void) | null = null;
+      constructor() { FakeSpeechRecognition.latest = this; }
+      start() { this.onstart?.(); }
+      stop() { this.onend?.(); }
+      abort() { this.onend?.(); }
+    }
+    vi.stubGlobal("webkitSpeechRecognition", FakeSpeechRecognition);
+
+    render(<ChatWorkspace {...props} />);
+    const voiceButton = await screen.findByRole("button", { name: "语音输入" });
+    await waitFor(() => expect(voiceButton).toBeEnabled());
+    fireEvent.click(voiceButton);
+    expect(screen.getByRole("button", { name: "停止语音输入" })).toHaveAttribute("aria-pressed", "true");
+
+    act(() => {
+      FakeSpeechRecognition.latest.onresult?.({
+        resultIndex: 0,
+        results: [{ isFinal: true, 0: { transcript: "帮我整理会议纪要" } }],
+      });
+    });
+    expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("帮我整理会议纪要");
+
+    fireEvent.click(screen.getByRole("button", { name: "停止语音输入" }));
+    expect(screen.getByRole("button", { name: "语音输入" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("explains when browser speech recognition is unavailable", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    render(<ChatWorkspace {...props} />);
+
+    const voiceButton = screen.getByRole("button", { name: "语音输入" });
+    await waitFor(() => expect(voiceButton).toBeEnabled());
+    fireEvent.click(voiceButton);
+
+    expect(screen.getByRole("status")).toHaveTextContent("当前浏览器不支持语音输入");
   });
 });

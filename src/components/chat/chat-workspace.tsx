@@ -23,6 +23,7 @@ import {
   Link2,
   LogOut,
   Menu,
+  Mic,
   MessageSquareText,
   MoreHorizontal,
   PanelRight,
@@ -111,6 +112,40 @@ const STORAGE_KEY = "ai2dot.demo.messages.v1";
 const KNOWLEDGE_SELECTION_KEY = "ai2dot.knowledge.selection.v1";
 const RECENT_SKILLS_KEY = "ai2dot.skills.recent.v1";
 const CHAT_TRANSPORT = new DefaultChatTransport({ api: "/api/chat" });
+
+type BrowserSpeechRecognitionResult = {
+  isFinal: boolean;
+  0?: { transcript: string };
+};
+
+type BrowserSpeechRecognitionEvent = Event & {
+  resultIndex: number;
+  results: ArrayLike<BrowserSpeechRecognitionResult>;
+};
+
+type BrowserSpeechRecognitionErrorEvent = Event & {
+  error: string;
+};
+
+type BrowserSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+
+type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: BrowserSpeechRecognitionConstructor;
+  webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
+};
 
 type ChatWorkspaceProps = {
   models: ModelCatalogEntry[];
@@ -311,6 +346,11 @@ export function ChatWorkspace({
   const { language, t } = useLanguage();
   const router = useRouter();
   const [input, setInput] = useState("");
+  const [speechAvailability, setSpeechAvailability] = useState<
+    "checking" | "supported" | "unsupported"
+  >("checking");
+  const [isListening, setIsListening] = useState(false);
+  const [speechError, setSpeechError] = useState<string>();
   const [conversationSearch, setConversationSearch] = useState("");
   const [deepThinkingEnabled, setDeepThinkingEnabled] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState(
@@ -375,6 +415,9 @@ export function ChatWorkspace({
   );
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const speechInputBaseRef = useRef("");
+  const speechFinalTranscriptRef = useRef("");
   const sendErrorRef = useRef<Error | null>(null);
   const retryRef = useRef<{ intent: string; key: string; messageId: string } | null>(null);
   // Creating the persisted conversation must not replace an in-flight SDK chat.
@@ -404,6 +447,29 @@ export function ChatWorkspace({
     updateLocalHour();
     const timer = window.setInterval(updateLocalHour, 60_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const speechWindow = window as SpeechRecognitionWindow;
+    const availabilityTimer = window.setTimeout(() => {
+      setSpeechAvailability(
+        speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
+          ? "supported"
+          : "unsupported",
+      );
+    }, 0);
+
+    return () => {
+      window.clearTimeout(availabilityTimer);
+      const recognition = speechRecognitionRef.current;
+      if (!recognition) return;
+      recognition.onstart = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      recognition.abort();
+      speechRecognitionRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -792,6 +858,7 @@ export function ChatWorkspace({
     const parsedTokens = parseSkillTokens(originalValue);
     const value = parsedTokens.text;
     if (!originalValue || isBusy || isAwaitingApproval) return;
+    speechRecognitionRef.current?.stop();
     clearError();
     setCloudError(undefined);
     setIsNearBottom(true);
@@ -926,6 +993,73 @@ export function ChatWorkspace({
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     void submit();
+  };
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      speechRecognitionRef.current?.stop();
+      return;
+    }
+
+    const speechWindow = window as SpeechRecognitionWindow;
+    const SpeechRecognition =
+      speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechAvailability("unsupported");
+      setSpeechError(t("当前浏览器不支持语音输入"));
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    speechInputBaseRef.current = input.trimEnd();
+    speechFinalTranscriptRef.current = "";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = language === "en" ? "en-US" : "zh-CN";
+    recognition.onstart = () => {
+      setSpeechError(undefined);
+      setIsListening(true);
+    };
+    recognition.onresult = (event) => {
+      let interimTranscript = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = result?.[0]?.transcript ?? "";
+        if (result?.isFinal) speechFinalTranscriptRef.current += transcript;
+        else interimTranscript += transcript;
+      }
+      const recognizedText = `${speechFinalTranscriptRef.current}${interimTranscript}`.trim();
+      const separator = speechInputBaseRef.current && recognizedText ? " " : "";
+      setInput(`${speechInputBaseRef.current}${separator}${recognizedText}`);
+    };
+    recognition.onerror = (event) => {
+      const message = (() => {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          return t("未获得麦克风权限，请在浏览器设置中允许后重试");
+        }
+        if (event.error === "no-speech") return t("没有听清，请再试一次");
+        if (event.error === "audio-capture") return t("未检测到可用麦克风");
+        if (event.error === "network") return t("语音识别服务暂时不可用");
+        return t("语音输入失败，请重试");
+      })();
+      setSpeechError(message);
+      setIsListening(false);
+      speechRecognitionRef.current = null;
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      speechRecognitionRef.current = null;
+      window.requestAnimationFrame(() => composerTextareaRef.current?.focus());
+    };
+    speechRecognitionRef.current = recognition;
+    setSpeechError(undefined);
+    try {
+      recognition.start();
+    } catch {
+      speechRecognitionRef.current = null;
+      setIsListening(false);
+      setSpeechError(t("语音输入失败，请重试"));
+    }
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1434,14 +1568,33 @@ export function ChatWorkspace({
                 })}
               </div>
             )}
-            <textarea ref={composerTextareaRef} value={input} onChange={(event) => { setInput(event.target.value); if (/(^|\s)\/skill\s*$/.test(event.target.value)) setSkillPickerOpen(true); }} onKeyDown={handleComposerKeyDown} placeholder={`${t("继续提问，或让{{name}}完善上面的结果…", { name: assistantName })}`} rows={1} aria-label={t("消息")} />
+            <textarea ref={composerTextareaRef} value={input} onChange={(event) => { if (isListening) speechRecognitionRef.current?.stop(); setInput(event.target.value); if (/(^|\s)\/skill\s*$/.test(event.target.value)) setSkillPickerOpen(true); }} onKeyDown={handleComposerKeyDown} placeholder={`${t("继续提问，或让{{name}}完善上面的结果…", { name: assistantName })}`} rows={1} aria-label={t("消息")} />
+            {(isListening || speechError) && (
+              <div className={`composer-voice-status${isListening ? " is-listening" : ""}`} role="status">
+                {isListening && <span aria-hidden="true" />}
+                {isListening ? t("正在听… 再点一次结束") : speechError}
+              </div>
+            )}
             <div className="composer-toolbar">
               <div><button type="button" className={`tool-chip${useDeepThinking ? " is-active" : ""}`} disabled={!supportsDeepThinking} aria-pressed={useDeepThinking} title={supportsDeepThinking ? t("为下一次回答使用高强度推理") : t("当前模型不支持深度思考")} onClick={() => setDeepThinkingEnabled((enabled) => !enabled)}><Sparkles size={14} /> {t("深度思考")}</button><button type="button" className={`tool-chip${skillSelection.refs.length > 0 || skillSelection.mode === "manual" ? " is-active" : ""}`} aria-expanded={skillPickerOpen} disabled={!persistenceEnabled || !explicitSkillsEnabled || skillControlsLocked} onClick={() => setSkillPickerOpen((open) => !open)}><BookOpen size={14} /> Skills {skillSelection.refs.length > 0 ? skillSelection.refs.length : skillSelection.mode === "auto" ? "自动" : ""}</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> {t("知识库 {{count}}", { count: selectedKnowledgeBases.length })}</button>}</div>
-              {isBusy ? (
-                <button className="send-button stop-button" type="button" onClick={stop} aria-label={t("停止生成")}><Square size={14} fill="currentColor" /></button>
-              ) : (
-                <button className="send-button" type="submit" disabled={!input.trim() || isAwaitingApproval} aria-label={t("发送消息")}><ArrowUp size={18} /></button>
-              )}
+              <div className="composer-primary-actions">
+                <button
+                  className={`voice-input-button${isListening ? " is-listening" : ""}`}
+                  type="button"
+                  onClick={toggleVoiceInput}
+                  disabled={speechAvailability === "checking"}
+                  aria-label={isListening ? t("停止语音输入") : t("语音输入")}
+                  aria-pressed={isListening}
+                  title={speechAvailability === "unsupported" ? t("当前浏览器不支持语音输入") : isListening ? t("停止语音输入") : t("语音输入")}
+                >
+                  <Mic size={16} />
+                </button>
+                {isBusy ? (
+                  <button className="send-button stop-button" type="button" onClick={stop} aria-label={t("停止生成")}><Square size={14} fill="currentColor" /></button>
+                ) : (
+                  <button className="send-button" type="submit" disabled={!input.trim() || isAwaitingApproval} aria-label={t("发送消息")}><ArrowUp size={18} /></button>
+                )}
+              </div>
             </div>
             <SkillPicker
               open={skillPickerOpen && !skillControlsLocked && explicitSkillsEnabled}

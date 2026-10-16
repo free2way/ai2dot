@@ -1421,6 +1421,53 @@ textarea:focus-visible {
   border: 1px solid var(--line);
 }
 
+.composer-primary-actions {
+  flex: 0 0 auto;
+}
+
+.composer-toolbar .voice-input-button {
+  width: 30px;
+  padding: 0;
+  color: #595c53;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.composer-toolbar .voice-input-button.is-listening {
+  color: #182015;
+  background: var(--acid);
+  border-color: #93ae2f;
+  box-shadow: 0 0 0 3px rgb(192 226 76 / 18%);
+}
+
+.composer-voice-status {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 7px;
+  margin: -2px 3px 5px;
+  color: #9a463d;
+  font-size: 9px;
+}
+
+.composer-voice-status.is-listening {
+  color: #59662d;
+}
+
+.composer-voice-status > span {
+  width: 7px;
+  height: 7px;
+  background: #93ae2f;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgb(147 174 47 / 32%);
+  animation: voice-input-pulse 1.4s ease-out infinite;
+}
+
+@keyframes voice-input-pulse {
+  70% { box-shadow: 0 0 0 6px rgb(147 174 47 / 0%); }
+  100% { box-shadow: 0 0 0 0 rgb(147 174 47 / 0%); }
+}
+
 .composer-toolbar .send-button {
   width: 30px;
   padding: 0;
@@ -4673,7 +4720,55 @@ textarea:focus-visible {
   }
 
   .composer-dock {
-    padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+    padding: 8px max(10px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  .composer {
+    padding: 10px 10px 8px;
+    border-radius: 16px;
+  }
+
+  .composer:focus-within {
+    transform: none;
+  }
+
+  .composer textarea {
+    min-height: 44px;
+    padding: 4px 4px 8px;
+    font-size: 16px;
+    line-height: 1.45;
+  }
+
+  .composer-toolbar {
+    gap: 8px;
+  }
+
+  .composer-toolbar > div:first-child {
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .composer-toolbar > div:first-child::-webkit-scrollbar {
+    display: none;
+  }
+
+  .composer-toolbar button {
+    height: 40px;
+    flex: 0 0 auto;
+    border-radius: 10px;
+  }
+
+  .composer-toolbar .voice-input-button,
+  .composer-toolbar .send-button {
+    width: 40px;
+  }
+
+  .composer-voice-status {
+    min-height: 24px;
+    margin-bottom: 4px;
+    font-size: 10px;
   }
 
   .composer-session-label small {

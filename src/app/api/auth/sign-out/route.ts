@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { clearLocalSession } from "@/server/auth/local";
 
-export async function POST(request: Request) {
+export async function POST() {
   await clearLocalSession();
-  return NextResponse.redirect(new URL("/sign-in", request.url), 303);
+  return new NextResponse(null, {
+    status: 303,
+    headers: { location: "/sign-in" },
+  });
 }
