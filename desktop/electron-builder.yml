@@ -1,0 +1,41 @@
+appId: com.ai2dot.desktop
+productName: ai2dot
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+directories:
+  output: desktop/release
+  buildResources: desktop/build
+
+files:
+  - desktop/main.mjs
+  - desktop/lib/**/*
+  - package.json
+  - "!node_modules/**/*"
+
+extraMetadata:
+  main: desktop/main.mjs
+  description: ai2dot 本地 AI 工作台（macOS 桌面版）
+  author: ai2dot
+
+afterPack: desktop/scripts/after-pack.cjs
+
+asar: true
+npmRebuild: false
+
+mac:
+  category: public.app-category.productivity
+  icon: desktop/build/icon.icns
+  target:
+    - target: dmg
+    - target: zip
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  minimumSystemVersion: "12.0"
+  extendInfo:
+    NSCameraUsageDescription: ai2dot 需要使用摄像头完成视频相关功能。
+    NSMicrophoneUsageDescription: ai2dot 需要使用麦克风进行语音输入。
+
+dmg:
+  title: ai2dot ${version}
+  artifactName: ${productName}-${version}-${arch}.${ext}

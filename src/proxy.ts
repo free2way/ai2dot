@@ -1,6 +1,7 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { getAuthMode } from "@/server/auth/config";
 
 function isProtectedRoute(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -23,10 +24,7 @@ const authProxy = clerkMiddleware(async (auth, request) => {
 });
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
-  if (
-    !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
-    !process.env.CLERK_SECRET_KEY
-  ) {
+  if (getAuthMode() !== "clerk") {
     return NextResponse.next();
   }
 

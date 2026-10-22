@@ -7,6 +7,19 @@ const nextConfig: NextConfig = {
   deploymentId: process.env.DEPLOYMENT_VERSION || undefined,
   output: "standalone",
   poweredByHeader: false,
+  // PGlite ships WASM and extension tarballs that must stay on disk at
+  // runtime. Keep it external for the standalone desktop server and make
+  // sure the file tracer copies every runtime asset.
+  serverExternalPackages: [
+    "@electric-sql/pglite",
+    "@electric-sql/pglite-pgvector",
+  ],
+  outputFileTracingIncludes: {
+    "/*": [
+      "node_modules/@electric-sql/pglite/dist/**/*",
+      "node_modules/@electric-sql/pglite-pgvector/dist/**/*",
+    ],
+  },
   async redirects() {
     return [
       {

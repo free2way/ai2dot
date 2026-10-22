@@ -18,6 +18,17 @@ npm run dev
 npm run db:migrate
 ```
 
+## macOS 桌面版
+
+桌面版默认是**云端模式**：Electron 打开 Web 工作台，登录与 Web 共用同一套账号（Clerk 或本地账号），会话和知识库与 Web 一致。菜单 `账号` 可切换到本地离线模式（PGlite）。
+
+```bash
+npm run desktop:dev    # 本地开发模式
+npm run desktop:build  # 生成未签名 .dmg / .zip，输出到 desktop/release
+```
+
+详见 [desktop/README.md](desktop/README.md)。
+
 ## 常用页面
 
 - `/`：聊天首页

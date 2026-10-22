@@ -20,6 +20,17 @@ npm run db:migrate
 
 常用页面：`/`、`/chat/[id]`、`/admin`、`/knowledge`、`/assistants`、`/notebooks`。
 
+## macOS 桌面版
+
+默认云端模式：Electron 打开 Web 工作台，登录与 Web 共用同一套账号（Clerk 或本地账号），会话和知识库与 Web 一致；菜单 `账号` 可切换本地离线模式（PGlite）。
+
+```bash
+npm run desktop:dev    # 本地开发模式
+npm run desktop:build  # 生成未签名 .dmg / .zip，输出到 desktop/release
+```
+
+详见 [desktop/README.md](desktop/README.md)。
+
 质量检查：
 
 ```bash

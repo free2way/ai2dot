@@ -154,6 +154,7 @@ type ChatWorkspaceProps = {
   signedIn?: boolean;
   gatewayEnabled: boolean;
   persistenceEnabled?: boolean;
+  storageMode?: "local" | "cloud";
   storageIdentity?: string;
   explicitSkillsEnabled?: boolean;
   initialConversationId?: string;
@@ -326,6 +327,7 @@ export function ChatWorkspace({
   signedIn = false,
   gatewayEnabled,
   persistenceEnabled = false,
+  storageMode = "cloud",
   storageIdentity,
   explicitSkillsEnabled = true,
   initialConversationId,
@@ -1399,16 +1401,16 @@ export function ChatWorkspace({
               )}
             </div>
           )) : (
-            <p className="history-empty">{conversationSearch.trim() ? t("没有找到匹配的会话") : persistenceEnabled ? t("还没有云端会话") : t("当前会话保存在此浏览器")}</p>
+            <p className="history-empty">{conversationSearch.trim() ? t("没有找到匹配的会话") : persistenceEnabled ? (storageMode === "local" ? t("还没有本地会话") : t("还没有云端会话")) : t("当前会话保存在此浏览器")}</p>
           )}
         </div>
         {sessionNotice && <div className="session-notice"><Check size={12} /><span>{sessionNotice}</span><button onClick={() => setSessionNotice(undefined)}><X size={12} /></button></div>}
         <div className="sidebar-footer">
-          <div className="usage-line"><span>{persistenceEnabled ? t("云端同步") : t("本地存储")}</span><strong>{messages.length} {t("条消息")}</strong></div>
+          <div className="usage-line"><span>{persistenceEnabled ? (storageMode === "local" ? t("本地数据") : t("云端同步")) : t("本地存储")}</span><strong>{messages.length} {t("条消息")}</strong></div>
           <div className="usage-track"><span /></div>
           <button className="profile-row">
             <span className="avatar">{profileInitial}</span>
-            <span><strong>{profileName}</strong><small>{persistenceEnabled ? t("云端已同步") : t("本地演示")}</small></span>
+            <span><strong>{profileName}</strong><small>{persistenceEnabled ? (storageMode === "local" ? t("已保存到本机") : t("云端已同步")) : t("本地演示")}</small></span>
             <MoreHorizontal size={17} />
           </button>
         </div>

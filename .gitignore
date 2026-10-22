@@ -54,6 +54,10 @@ prompts/
 *.tsbuildinfo
 next-env.d.ts
 
+# macOS desktop build output
+/desktop/.runtime/
+/desktop/release/
+
 # local-only project and implementation documentation
 /AGENTS.md
 /CLAUDE.md

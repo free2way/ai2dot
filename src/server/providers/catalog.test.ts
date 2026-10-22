@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   assertSafeProviderBaseUrl,
+  isDesktopReachableAddress,
   isPrivateNetworkAddress,
   parseProviderCatalog,
 } from "@/server/providers/catalog";
@@ -73,5 +74,39 @@ describe("provider URL safety", () => {
   it("blocks non-HTTPS and localhost provider URLs", async () => {
     await expect(assertSafeProviderBaseUrl("http://api.example.com/v1")).rejects.toThrow("HTTPS");
     await expect(assertSafeProviderBaseUrl("https://localhost:11434/v1")).rejects.toThrow("Private");
+  });
+});
+
+describe("desktop provider URL policy", () => {
+  const previousDesktop = process.env.AI2DOT_DESKTOP;
+
+  afterEach(() => {
+    if (previousDesktop === undefined) delete process.env.AI2DOT_DESKTOP;
+    else process.env.AI2DOT_DESKTOP = previousDesktop;
+  });
+
+  it("allows HTTP loopback and LAN providers in desktop mode", async () => {
+    process.env.AI2DOT_DESKTOP = "1";
+    await expect(
+      assertSafeProviderBaseUrl("http://127.0.0.1:11434/v1"),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertSafeProviderBaseUrl("http://192.168.1.20:1234/v1"),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertSafeProviderBaseUrl("http://localhost:8080/v1"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("still blocks metadata and multicast addresses in desktop mode", async () => {
+    process.env.AI2DOT_DESKTOP = "1";
+    await expect(
+      assertSafeProviderBaseUrl("http://169.254.169.254/latest"),
+    ).rejects.toThrow("Private");
+    await expect(
+      assertSafeProviderBaseUrl("http://239.0.0.1/v1"),
+    ).rejects.toThrow("Private");
+    expect(isDesktopReachableAddress("10.0.0.5")).toBe(true);
+    expect(isDesktopReachableAddress("169.254.1.1")).toBe(false);
   });
 });

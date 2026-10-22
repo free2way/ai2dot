@@ -69,9 +69,38 @@ export function isPrivateNetworkAddress(address: string) {
   );
 }
 
+/**
+ * Desktop builds run against user-owned local inference servers (Ollama,
+ * LM Studio, LAN gateways). They may use loopback/RFC1918 hosts over HTTP,
+ * but link-local metadata and multicast addresses stay blocked.
+ */
+export function isDesktopReachableAddress(address: string) {
+  const normalized = address.toLowerCase().replace(/^::ffff:/, "");
+  if (normalized.includes(":")) {
+    return !(
+      normalized === "::" ||
+      /^fe[89ab]/.test(normalized) ||
+      normalized.startsWith("ff")
+    );
+  }
+
+  const octets = normalized.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value))) {
+    return false;
+  }
+  const [first, second] = octets;
+  return first !== 0 && !(first === 169 && second === 254) && first < 224;
+}
+
+function isDesktopProviderMode() {
+  return process.env.AI2DOT_DESKTOP === "1";
+}
+
 export async function assertSafeProviderBaseUrl(value: string) {
   const url = new URL(value);
-  if (url.protocol !== "https:") {
+  const desktop = isDesktopProviderMode();
+
+  if (url.protocol !== "https:" && !(desktop && url.protocol === "http:")) {
     throw new Error("Provider Base URL must use HTTPS.");
   }
   if (url.username || url.password) {
@@ -80,21 +109,28 @@ export async function assertSafeProviderBaseUrl(value: string) {
 
   const hostname = url.hostname.toLowerCase();
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    if (desktop) return;
     throw new Error("Private provider addresses are not allowed.");
   }
 
   if (isIP(hostname)) {
-    if (isPrivateNetworkAddress(hostname)) {
+    const unsafe = desktop
+      ? !isDesktopReachableAddress(hostname)
+      : isPrivateNetworkAddress(hostname);
+    if (unsafe) {
       throw new Error("Private provider addresses are not allowed.");
     }
     return;
   }
 
   const addresses = await lookup(hostname, { all: true, verbatim: true });
-  if (
-    addresses.length === 0 ||
-    addresses.some((entry) => isPrivateNetworkAddress(entry.address))
-  ) {
+  if (addresses.length === 0) {
+    throw new Error("Provider hostname could not be resolved.");
+  }
+  const unsafe = desktop
+    ? addresses.some((entry) => !isDesktopReachableAddress(entry.address))
+    : addresses.some((entry) => isPrivateNetworkAddress(entry.address));
+  if (unsafe) {
     throw new Error("Provider hostname resolves to a private address.");
   }
 }
@@ -159,7 +195,7 @@ export async function fetchProviderCatalog({
     await assertSafeProviderBaseUrl(baseUrl);
   }
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithValidatedRedirects(endpoint, {
     headers: secret ? { authorization: `Bearer ${secret}` } : undefined,
     signal: AbortSignal.timeout(15_000),
     cache: "no-store",
@@ -170,4 +206,31 @@ export async function fetchProviderCatalog({
   }
 
   return parseProviderCatalog(await response.json());
+}
+
+async function fetchWithValidatedRedirects(
+  endpoint: string,
+  init: RequestInit,
+  maxRedirects = 3,
+) {
+  let current = endpoint;
+
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    const response = await fetch(current, {
+      ...init,
+      redirect: "manual",
+    });
+
+    if (response.status < 300 || response.status >= 400) return response;
+
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error("Provider catalog redirect is missing a location.");
+    }
+
+    current = new URL(location, current).toString();
+    await assertSafeProviderBaseUrl(current);
+  }
+
+  throw new Error("Provider catalog redirected too many times.");
 }

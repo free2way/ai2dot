@@ -49,6 +49,7 @@ export default async function WorkspacePage() {
           (!authConfigured || Boolean(identity)))
       }
       persistenceEnabled={Boolean(context)}
+      storageMode={process.env.AI2DOT_DESKTOP === "1" ? "local" : "cloud"}
       storageIdentity={context ? `${context.workspaceId}:${context.userId}` : undefined}
       explicitSkillsEnabled={isExplicitSkillsEnabled()}
       initialUserName={userName}

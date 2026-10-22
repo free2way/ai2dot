@@ -10,11 +10,15 @@ import {
   createKnowledgeDocument,
   failKnowledgeDocument,
   indexKnowledgeDocument,
+  MAX_KNOWLEDGE_DOCUMENT_CHARACTERS,
 } from "@/server/knowledge/store";
 import { logServerEvent } from "@/server/observability/log";
 import { processKnowledgeEmbeddingJobs } from "@/server/knowledge/embedding-jobs";
 
 export const maxDuration = 300;
+
+// Multipart framing adds a small overhead on top of the file itself.
+const MAX_KNOWLEDGE_REQUEST_BYTES = MAX_KNOWLEDGE_FILE_SIZE + 1024 * 1024;
 
 export async function POST(
   request: Request,
@@ -22,6 +26,12 @@ export async function POST(
 ) {
   const context = await getWorkspaceContext();
   if (!context) return Response.json({ message: "请先登录。" }, { status: 401 });
+
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_KNOWLEDGE_REQUEST_BYTES) {
+    return Response.json({ message: "上传内容不能超过 5MB。" }, { status: 413 });
+  }
+
   const { id } = await params;
   const form = await request.formData();
   const file = form.get("file");
@@ -59,6 +69,12 @@ export async function POST(
   } else {
     if (!pastedName || !pastedContent) {
       return Response.json({ message: "请输入文档名称和正文。" }, { status: 400 });
+    }
+    if (pastedContent.length > MAX_KNOWLEDGE_DOCUMENT_CHARACTERS) {
+      return Response.json(
+        { message: "文档正文不能超过 500,000 个字符。" },
+        { status: 413 },
+      );
     }
     name = pastedName.slice(0, 160);
     mimeType = "text/plain";

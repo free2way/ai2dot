@@ -34,12 +34,23 @@ function consumeLoginAttempt(key: string, now = Date.now()) {
   return true;
 }
 
+function loginAttemptKey(requestHeaders: Headers) {
+  // Forwarded headers are client-controlled unless a trusted reverse proxy
+  // overwrites them. Only honour them when the deployment opts in.
+  if (process.env.AI2DOT_TRUST_PROXY !== "true") return "direct";
+  const forwarded = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return (
+    forwarded ||
+    requestHeaders.get("x-real-ip")?.trim() ||
+    "direct"
+  );
+}
+
 export async function signInLocally(formData: FormData) {
   if (!isLocalAuthConfigured()) redirect("/sign-in?error=configuration");
 
   const requestHeaders = await headers();
-  const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0];
-  const attemptKey = forwardedFor?.trim() || "unknown";
+  const attemptKey = loginAttemptKey(requestHeaders);
   if (!consumeLoginAttempt(attemptKey)) {
     redirect("/sign-in?error=rate-limit");
   }

@@ -11,6 +11,7 @@ import {
   type UIMessage,
   validateUIMessages,
 } from "ai";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { createKnowledgeSourceParts } from "@/lib/chat-sources";
 import {
@@ -83,6 +84,14 @@ import {
 } from "@/server/skills/resolve";
 
 export const maxDuration = 60;
+
+const MAX_CHAT_REQUEST_BYTES = 4 * 1024 * 1024;
+
+// Never let tool approvals fall back to an unsigned mode: if the deployment
+// did not configure a stable secret, use a per-process random one. Approval
+// continuations across processes then fail closed instead of accepting
+// client-forged approvals.
+const ephemeralToolApprovalSecret = randomBytes(32).toString("base64url");
 
 const chatRequestSchema = z.object({
   messages: z.array(z.custom<UIMessage>()).min(1).max(1000),
@@ -246,9 +255,25 @@ function generationError(
 export async function POST(request: Request) {
   const requestStartedAt = Date.now();
   const requestLogId = request.headers.get("x-vercel-id") ?? crypto.randomUUID();
+
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_CHAT_REQUEST_BYTES) {
+    return Response.json(
+      { code: "PAYLOAD_TOO_LARGE", message: "消息内容过大。" },
+      { status: 413 },
+    );
+  }
+
   let requestBody: unknown;
   try {
-    requestBody = await request.json();
+    const rawBody = await request.text();
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_CHAT_REQUEST_BYTES) {
+      return Response.json(
+        { code: "PAYLOAD_TOO_LARGE", message: "消息内容过大。" },
+        { status: 413 },
+      );
+    }
+    requestBody = JSON.parse(rawBody);
   } catch {
     return Response.json(
       { code: "INVALID_REQUEST", message: "消息格式不正确。" },
@@ -924,9 +949,10 @@ export async function POST(request: Request) {
               ? "approved"
               : "user-approval",
           experimental_toolApprovalSecret:
-            process.env.AI2DOT_TOOL_APPROVAL_SECRET ||
-            process.env.AI2DOT_SESSION_SECRET ||
-            process.env.PROVIDER_SECRET_ENCRYPTION_KEY,
+            process.env.AI2DOT_TOOL_APPROVAL_SECRET?.trim() ||
+            process.env.AI2DOT_SESSION_SECRET?.trim() ||
+            process.env.PROVIDER_SECRET_ENCRYPTION_KEY?.trim() ||
+            ephemeralToolApprovalSecret,
         }
       : {}),
     ...(gatewayRouted

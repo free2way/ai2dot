@@ -1,9 +1,16 @@
+import { timingSafeEqual } from "node:crypto";
 import { processKnowledgeEmbeddingJobs } from "@/server/knowledge/embedding-jobs";
 import { logServerEvent } from "@/server/observability/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 export const runtime = "nodejs";
+
+function matchesCronSecret(header: string | null, secret: string) {
+  const expected = Buffer.from(`Bearer ${secret}`);
+  const actual = Buffer.from(header ?? "");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
@@ -13,7 +20,7 @@ export async function GET(request: Request) {
       { status: 503 },
     );
   }
-  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!matchesCronSecret(request.headers.get("authorization"), secret)) {
     return Response.json(
       { code: "UNAUTHORIZED", message: "Unauthorized." },
       { status: 401 },

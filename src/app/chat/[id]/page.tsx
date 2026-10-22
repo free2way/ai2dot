@@ -94,6 +94,7 @@ export default async function ConversationPage({
       signedIn
       gatewayEnabled={workspaceModels.length > 0 || isAiGatewayConfigured()}
       persistenceEnabled
+      storageMode={process.env.AI2DOT_DESKTOP === "1" ? "local" : "cloud"}
       key={id}
       storageIdentity={`${context.workspaceId}:${context.userId}`}
       explicitSkillsEnabled={isExplicitSkillsEnabled()}

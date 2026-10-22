@@ -28,7 +28,7 @@ import type { WorkspaceContext } from "@/server/db/workspace";
 import { enqueueKnowledgeEmbeddingJob } from "@/server/knowledge/embedding-jobs";
 import { embedKnowledgeQuery } from "@/server/knowledge/embeddings";
 
-const MAX_DOCUMENT_CHARACTERS = 500_000;
+export const MAX_KNOWLEDGE_DOCUMENT_CHARACTERS = 500_000;
 const CHUNK_SIZE = 1_200;
 const CHUNK_OVERLAP = 160;
 
@@ -40,7 +40,7 @@ export function splitKnowledgeText(source: string) {
     .trim();
 
   if (!text) return [];
-  if (text.length > MAX_DOCUMENT_CHARACTERS) {
+  if (text.length > MAX_KNOWLEDGE_DOCUMENT_CHARACTERS) {
     throw new Error("文档正文不能超过 500,000 个字符。");
   }
 

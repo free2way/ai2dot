@@ -174,6 +174,9 @@ export async function deleteMcpSource(
 }
 
 async function connectSource(source: typeof mcpSources.$inferSelect) {
+  // Revalidate at connect time: stored URLs may predate policy changes and
+  // DNS can be rebound after the source was created.
+  await assertSafeProviderBaseUrl(source.url);
   const secret = source.encryptedSecret
     ? await decryptProviderSecret(source.encryptedSecret)
     : undefined;
