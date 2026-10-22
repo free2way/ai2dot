@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("sitePicker", {
-  current: () => ipcRenderer.invoke("site:current"),
+  listSites: () => ipcRenderer.invoke("sites:list"),
+  saveSites: (sites) => ipcRenderer.invoke("sites:save", sites),
+  resetSites: () => ipcRenderer.invoke("sites:reset"),
   choose: (payload) => ipcRenderer.invoke("site:choose", payload),
   cancel: () => ipcRenderer.send("site:cancel"),
 });

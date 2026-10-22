@@ -12,14 +12,21 @@
     background: #07090c; color: #e7ece3;
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
     display: flex; flex-direction: column;
-    padding: 32px 36px 24px; user-select: none;
+    padding: 26px 32px 20px; user-select: none;
   }
+  .view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .hidden { display: none !important; }
   h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: .2px; }
-  .sub { margin: 8px 0 24px; color: #8b9588; font-size: 13px; line-height: 1.6; }
-  .options { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; flex: 1; }
+  .sub { margin: 8px 0 18px; color: #8b9588; font-size: 13px; line-height: 1.6; }
+
+  .options {
+    flex: 1; min-height: 0; overflow: auto; padding-right: 4px;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px; align-content: start;
+  }
   .option {
-    position: relative; display: flex; flex-direction: column; gap: 10px;
-    padding: 18px; border-radius: 16px; text-align: left; cursor: pointer;
+    position: relative; display: flex; flex-direction: column; gap: 8px;
+    min-height: 132px; padding: 16px; border-radius: 15px; text-align: left; cursor: pointer;
     background: #0d1016; color: inherit; border: 1px solid rgba(255,255,255,.09);
     transition: border-color .16s ease, background .16s ease, transform .16s ease;
   }
@@ -33,107 +40,295 @@
   }
   .badge.muted { background: rgba(255,255,255,.05); color: #9aa396; border-color: rgba(255,255,255,.1); }
   h2 { margin: 0; font-size: 15px; font-weight: 600; }
-  .host { color: #b7f34a; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
-  .desc { margin: 0; color: #8b9588; font-size: 12px; line-height: 1.55; }
-  .foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; }
+  .host { color: #b7f34a; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .desc { margin: 0; color: #8b9588; font-size: 12px; line-height: 1.5; }
+
+  .editor { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+  .edit-head, .edit-row {
+    display: grid; grid-template-columns: 140px minmax(0, 1fr) 58px;
+    gap: 8px; align-items: center;
+  }
+  .edit-head { color: #6f786d; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 0 2px; }
+  .edit-row input {
+    width: 100%; padding: 9px 10px; border-radius: 9px;
+    border: 1px solid rgba(255,255,255,.12); background: #0d1016; color: #e7ece3;
+    font-size: 12px; outline: none;
+  }
+  .edit-row input:focus { border-color: rgba(183,243,74,.6); }
+  .edit-row input.url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .remove {
+    padding: 8px 0; border-radius: 8px; font-size: 11px; cursor: pointer;
+    border: 1px solid rgba(240,120,90,.35); background: rgba(240,120,90,.08); color: #f0a26b;
+  }
+  .remove:hover { background: rgba(240,120,90,.16); }
+  .remove:disabled { opacity: .35; cursor: not-allowed; }
+  .add {
+    align-self: flex-start; margin-top: 10px; padding: 8px 13px; border-radius: 9px;
+    font-size: 12px; cursor: pointer; color: #c6cec2;
+    border: 1px dashed rgba(255,255,255,.18); background: transparent;
+  }
+  .add:hover { border-color: rgba(183,243,74,.45); color: #b7f34a; }
+
+  .foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
   .hint { color: #6f786d; font-size: 11px; line-height: 1.5; }
-  .actions { display: flex; gap: 10px; }
+  .actions { display: flex; gap: 9px; flex-shrink: 0; }
   button.action {
-    padding: 9px 16px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    padding: 9px 15px; border-radius: 10px; font-size: 12px; font-weight: 600;
     border: 1px solid rgba(255,255,255,.12); background: transparent; color: #c6cec2; cursor: pointer;
   }
   button.action:hover { background: rgba(255,255,255,.06); }
   button.primary { background: #b7f34a; border-color: #b7f34a; color: #141b07; }
   button.primary:hover { background: #c6f764; }
-  .status { min-height: 18px; margin-top: 10px; color: #f0a26b; font-size: 12px; }
+  .status { min-height: 18px; margin-top: 8px; color: #f0a26b; font-size: 12px; }
 </style>
 </head>
 <body>
-  <h1>选择登录站点</h1>
-  <p class="sub">桌面端会加载所选站点的登录页，登录账号与业务数据都归属该站点。选择“本地模式”则使用本机数据库，离线可用，账号也独立保存在本机。</p>
-
-  <div class="options">
-    <button class="option" data-mode="cloud" data-url="https://ai.ai2dot.com">
-      <span class="badge muted">线上</span>
-      <h2>ai.ai2dot.com</h2>
-      <span class="host">ai.ai2dot.com</span>
-      <p class="desc">线上 Web 部署，账号、会话与知识库都在云端，需要联网。</p>
-    </button>
-
-    <button class="option" data-mode="cloud" data-url="https://dot.ai2dot.com">
-      <span class="badge">本地 Docker</span>
-      <h2>dot.ai2dot.com</h2>
-      <span class="host">dot.ai2dot.com</span>
-      <p class="desc">连接本地 Docker 部署，账号与数据跟随该站点；启动前请确认服务可访问。</p>
-    </button>
-
-    <button class="option" data-mode="local" data-url="">
-      <span class="badge muted">离线</span>
-      <h2>本地模式</h2>
-      <span class="host">PGlite · 本机</span>
-      <p class="desc">完全使用本机资源与数据库，不依赖网络；账号为本机独立账号。</p>
-    </button>
-  </div>
-
-  <div class="status" id="status"></div>
-
-  <div class="foot">
-    <span class="hint">选择后会重启应用。之后可在菜单「账号 → 切换登录站点…」再次修改。</span>
-    <div class="actions">
-      <button class="action" id="cancel">取消</button>
+  <section class="view" id="pickerView">
+    <h1>选择登录站点</h1>
+    <p class="sub">桌面端会加载所选站点的登录页，登录账号与业务数据都归属该站点。选择“本地模式”则使用本机数据库，离线可用，账号也独立保存在本机。</p>
+    <div class="options" id="siteOptions"></div>
+    <div class="status" id="pickerStatus"></div>
+    <div class="foot">
+      <span class="hint">选择后会重启应用。之后可在菜单「账号 → 切换登录站点…」再次修改。</span>
+      <div class="actions">
+        <button class="action" id="manage">管理站点</button>
+        <button class="action" id="cancel">取消</button>
+      </div>
     </div>
-  </div>
+  </section>
+
+  <section class="view hidden" id="manageView">
+    <h1>管理登录站点</h1>
+    <p class="sub">添加或修改要连接的 Web 站点。地址必须使用 HTTPS；本机调试可以使用 http://127.0.0.1。最多 10 个站点。</p>
+    <div class="edit-head"><span>名称</span><span>站点地址</span><span></span></div>
+    <div class="editor" id="siteEditor"></div>
+    <button class="add" id="addSite">+ 添加站点</button>
+    <div class="status" id="manageStatus"></div>
+    <div class="foot">
+      <span class="hint">保存后返回站点列表；正在使用的站点被修改时，重启后生效。</span>
+      <div class="actions">
+        <button class="action" id="resetSites">恢复默认</button>
+        <button class="action" id="back">返回</button>
+        <button class="action primary" id="saveSites">保存</button>
+      </div>
+    </div>
+  </section>
 
   <script>
-    const status = document.getElementById("status");
-    let current = null;
+    const pickerView = document.getElementById("pickerView");
+    const manageView = document.getElementById("manageView");
+    const optionsEl = document.getElementById("siteOptions");
+    const editorEl = document.getElementById("siteEditor");
+    const pickerStatus = document.getElementById("pickerStatus");
+    const manageStatus = document.getElementById("manageStatus");
+    const state = { sites: [], current: { mode: "cloud", serverUrl: "" }, editor: [] };
     let busy = false;
 
-    function sameSite(option) {
-      if (!current) return false;
-      if (option.dataset.mode === "local") return current.mode === "local";
-      return current.mode === "cloud" &&
-        option.dataset.url === current.serverUrl.replace(/\/+$/, "");
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
     }
 
-    function markCurrent() {
-      for (const option of document.querySelectorAll(".option")) {
-        option.classList.toggle("current", sameSite(option));
+    function hostOf(url) {
+      try { return new URL(url).host; } catch { return url; }
+    }
+
+    function setStatus(node, message) {
+      node.textContent = message || "";
+    }
+
+    function isCurrent(site) {
+      return state.current.mode === "cloud" &&
+        site.url.replace(/\/+$/, "") === state.current.serverUrl.replace(/\/+$/, "");
+    }
+
+    function card({ badge, title, host, desc, current, onClick, mutedBadge = false, id }) {
+      const button = el("button", "option");
+      if (current) button.classList.add("current");
+      if (id) button.dataset.siteId = id;
+      button.append(el("span", mutedBadge ? "badge muted" : "badge", badge));
+      button.append(el("h2", "", title));
+      button.append(el("span", "host", host));
+      button.append(el("p", "desc", desc));
+      button.addEventListener("click", onClick);
+      return button;
+    }
+
+    function setChoicesEnabled(enabled) {
+      for (const button of optionsEl.querySelectorAll("button")) button.disabled = !enabled;
+    }
+
+    function renderPicker() {
+      optionsEl.textContent = "";
+      for (const site of state.sites) {
+        optionsEl.append(card({
+          badge: "云端",
+          title: site.name,
+          host: hostOf(site.url),
+          desc: "使用该站点的账号、会话与知识库。",
+          current: isCurrent(site),
+          id: site.id,
+          onClick: () => chooseSite(site),
+        }));
       }
+      optionsEl.append(card({
+        badge: "离线",
+        title: "本地模式",
+        host: "PGlite · 本机",
+        desc: "完全使用本机资源与数据库，不依赖网络；账号为本机独立账号。",
+        current: state.current.mode === "local",
+        mutedBadge: true,
+        onClick: chooseLocal,
+      }));
     }
 
-    async function choose(option) {
+    async function chooseSite(site) {
       if (busy) return;
       busy = true;
-      status.textContent = "正在保存并重启…";
-      for (const item of document.querySelectorAll(".option")) item.disabled = true;
+      setStatus(pickerStatus, "正在保存并重启…");
+      setChoicesEnabled(false);
       try {
-        const result = await window.sitePicker.choose({
-          mode: option.dataset.mode,
-          serverUrl: option.dataset.url,
-        });
+        const result = await window.sitePicker.choose({ mode: "cloud", serverUrl: site.url });
         if (!result?.ok) {
-          status.textContent = result?.error || "保存失败，请重试。";
+          setStatus(pickerStatus, result?.error || "保存失败，请重试。");
           busy = false;
-          for (const item of document.querySelectorAll(".option")) item.disabled = false;
+          setChoicesEnabled(true);
         }
       } catch (error) {
-        status.textContent = String(error?.message || error);
+        setStatus(pickerStatus, String(error?.message || error));
         busy = false;
-        for (const item of document.querySelectorAll(".option")) item.disabled = false;
+        setChoicesEnabled(true);
       }
     }
 
-    for (const option of document.querySelectorAll(".option")) {
-      option.addEventListener("click", () => choose(option));
+    async function chooseLocal() {
+      if (busy) return;
+      busy = true;
+      setStatus(pickerStatus, "正在保存并重启…");
+      setChoicesEnabled(false);
+      try {
+        const result = await window.sitePicker.choose({ mode: "local" });
+        if (!result?.ok) {
+          setStatus(pickerStatus, result?.error || "保存失败，请重试。");
+          busy = false;
+          setChoicesEnabled(true);
+        }
+      } catch (error) {
+        setStatus(pickerStatus, String(error?.message || error));
+        busy = false;
+        setChoicesEnabled(true);
+      }
     }
+
+    function showPicker() {
+      manageView.classList.add("hidden");
+      pickerView.classList.remove("hidden");
+      setStatus(manageStatus, "");
+      renderPicker();
+    }
+
+    function showManage() {
+      state.editor = state.sites.map((site) => ({ ...site }));
+      pickerView.classList.add("hidden");
+      manageView.classList.remove("hidden");
+      setStatus(manageStatus, "");
+      renderEditor();
+    }
+
+    function renderEditor() {
+      editorEl.textContent = "";
+      state.editor.forEach((site, index) => {
+        const row = el("div", "edit-row");
+        const name = el("input");
+        name.value = site.name;
+        name.maxLength = 40;
+        name.placeholder = "站点名称";
+        name.addEventListener("input", () => { state.editor[index].name = name.value; });
+
+        const url = el("input", "url");
+        url.value = site.url;
+        url.placeholder = "https://example.com";
+        url.addEventListener("input", () => { state.editor[index].url = url.value; });
+
+        const remove = el("button", "remove", "删除");
+        remove.disabled = state.editor.length === 1;
+        remove.addEventListener("click", () => {
+          state.editor.splice(index, 1);
+          renderEditor();
+        });
+
+        row.append(name, url, remove);
+        editorEl.append(row);
+      });
+    }
+
+    document.getElementById("manage").addEventListener("click", showManage);
+    document.getElementById("back").addEventListener("click", showPicker);
     document.getElementById("cancel").addEventListener("click", () => window.sitePicker.cancel());
 
-    window.sitePicker.current().then((value) => {
-      current = value;
-      if (current?.serverUrl) current.serverUrl = current.serverUrl.replace(/\/+$/, "");
-      markCurrent();
-    }).catch(() => {});
+    document.getElementById("addSite").addEventListener("click", () => {
+      if (state.editor.length >= 10) {
+        setStatus(manageStatus, "最多支持 10 个站点。");
+        return;
+      }
+      state.editor.push({
+        id: `custom-${crypto.randomUUID()}`,
+        name: "新站点",
+        url: "https://",
+      });
+      renderEditor();
+      const inputs = editorEl.querySelectorAll(".edit-row input");
+      inputs[inputs.length - 2]?.focus();
+      inputs[inputs.length - 2]?.select();
+    });
+
+    document.getElementById("resetSites").addEventListener("click", async () => {
+      const result = await window.sitePicker.resetSites();
+      if (!result?.ok) {
+        setStatus(manageStatus, result?.error || "恢复默认失败。");
+        return;
+      }
+      state.sites = result.sites;
+      state.current = result.current;
+      state.editor = state.sites.map((site) => ({ ...site }));
+      renderEditor();
+      setStatus(manageStatus, "已恢复默认站点，点击保存后返回。");
+    });
+
+    document.getElementById("saveSites").addEventListener("click", async () => {
+      const payload = state.editor.map((site, index) => ({
+        id: site.id || `site-${index + 1}`,
+        name: String(site.name || "").trim(),
+        url: String(site.url || "").trim(),
+      }));
+      if (payload.length === 0) {
+        setStatus(manageStatus, "至少保留一个站点。");
+        return;
+      }
+      if (payload.some((site) => !site.name || !site.url)) {
+        setStatus(manageStatus, "站点名称和地址不能为空。");
+        return;
+      }
+      const result = await window.sitePicker.saveSites(payload);
+      if (!result?.ok) {
+        setStatus(manageStatus, result?.error || "保存失败，请重试。");
+        return;
+      }
+      state.sites = result.sites;
+      state.current = result.current;
+      setStatus(pickerStatus, "站点已保存。");
+      showPicker();
+    });
+
+    window.sitePicker.listSites().then((data) => {
+      state.sites = data.sites;
+      state.current = data.current;
+      renderPicker();
+    }).catch((error) => {
+      setStatus(pickerStatus, String(error?.message || error));
+    });
   </script>
 </body>
 </html>

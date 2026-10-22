@@ -18,9 +18,11 @@ import {
 } from "./lib/config.mjs";
 import {
   DEFAULT_CLOUD_URL,
+  defaultSites,
   loadSettings,
   normalizeServerUrl,
   saveSettings,
+  validateSites,
 } from "./lib/settings.mjs";
 import {
   buildServerEnv,
@@ -466,9 +468,56 @@ function openSitePicker({ firstRun = false } = {}) {
 }
 
 function registerSitePickerIpc() {
-  ipcMain.handle("site:current", () => {
-    const current = settings ?? { mode: "cloud", serverUrl: DEFAULT_CLOUD_URL };
-    return { mode: current.mode, serverUrl: current.serverUrl };
+  ipcMain.handle("sites:list", () => {
+    const current = settings ?? loadSettings(paths.root);
+    settings = current;
+    return {
+      sites: current.sites,
+      current: { mode: current.mode, serverUrl: current.serverUrl },
+    };
+  });
+
+  ipcMain.handle("sites:save", async (_event, payload) => {
+    try {
+      if (!settings) settings = loadSettings(paths.root);
+      const sites = validateSites(payload);
+      const previousSite = settings.sites.find(
+        (site) => site.url === settings.serverUrl,
+      );
+      const updatedSite = previousSite
+        ? sites.find((site) => site.id === previousSite.id)
+        : null;
+      const serverUrl = updatedSite?.url ?? settings.serverUrl;
+
+      settings = saveSettings(paths.root, { ...settings, sites, serverUrl });
+      logLine(`sites saved count=${sites.length}`);
+      return {
+        ok: true,
+        sites: settings.sites,
+        current: { mode: settings.mode, serverUrl: settings.serverUrl },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle("sites:reset", () => {
+    if (!settings) settings = loadSettings(paths.root);
+    const sites = defaultSites();
+    settings = saveSettings(paths.root, {
+      ...settings,
+      sites,
+      serverUrl: DEFAULT_CLOUD_URL,
+    });
+    logLine("sites reset to defaults");
+    return {
+      ok: true,
+      sites: settings.sites,
+      current: { mode: settings.mode, serverUrl: settings.serverUrl },
+    };
   });
 
   ipcMain.handle("site:choose", async (_event, payload) => {

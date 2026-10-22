@@ -1,8 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export const DEFAULT_CLOUD_URL = "https://dot.ai2dot.com";
+export const DEFAULT_CLOUD_URL = "https://dot.ai2note.com";
+export const LEGACY_CLOUD_URL = "https://dot.ai2dot.com";
 export const DESKTOP_MODES = ["cloud", "local"];
+export const DEFAULT_SITES = [
+  {
+    id: "ai",
+    name: "线上版",
+    url: "https://ai.ai2dot.com",
+  },
+  {
+    id: "note",
+    name: "本地 Docker",
+    url: "https://dot.ai2note.com",
+  },
+];
+const MAX_SITES = 10;
 
 export function settingsPath(root) {
   return path.join(root, "desktop-settings.json");
@@ -33,11 +47,91 @@ function normalizeMode(value) {
   return DESKTOP_MODES.includes(value) ? value : "cloud";
 }
 
+export function defaultSites() {
+  return DEFAULT_SITES.map((site) => ({ ...site }));
+}
+
+function normalizeSite(value, index) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`第 ${index + 1} 个站点格式不正确。`);
+  }
+
+  const name =
+    typeof value.name === "string" ? value.name.trim().slice(0, 40) : "";
+  if (!name) {
+    throw new Error(`第 ${index + 1} 个站点缺少名称。`);
+  }
+
+  if (typeof value.url !== "string" || !value.url.trim()) {
+    throw new Error(`第 ${index + 1} 个站点缺少地址。`);
+  }
+
+  const id =
+    typeof value.id === "string" && value.id.trim()
+      ? value.id.trim().slice(0, 80)
+      : `site-${index + 1}`;
+
+  return {
+    id,
+    name,
+    url: normalizeServerUrl(value.url),
+  };
+}
+
+export function validateSites(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("至少保留一个登录站点。");
+  }
+  if (value.length > MAX_SITES) {
+    throw new Error(`最多支持 ${MAX_SITES} 个登录站点。`);
+  }
+
+  const ids = new Set();
+  const urls = new Set();
+
+  return value.map((item, index) => {
+    const site = normalizeSite(item, index);
+    if (urls.has(site.url)) {
+      throw new Error(`站点地址重复：${site.url}`);
+    }
+    let id = site.id;
+    while (ids.has(id)) id = `${id}-${index + 1}`;
+    ids.add(id);
+    urls.add(site.url);
+    return { ...site, id };
+  });
+}
+
+function normalizeSites(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return defaultSites();
+  }
+
+  const sites = [];
+  for (const item of value.slice(0, MAX_SITES)) {
+    try {
+      const site = normalizeSite(item, sites.length);
+      if (!sites.some((existing) => existing.url === site.url)) {
+        sites.push(site);
+      }
+    } catch {
+      // Skip malformed entries and keep the rest usable.
+    }
+  }
+
+  return sites.length > 0 ? sites : defaultSites();
+}
+
+function migrateLegacyUrl(url) {
+  return url === LEGACY_CLOUD_URL ? DEFAULT_CLOUD_URL : url;
+}
+
 export function defaultSettings() {
   return {
-    version: 1,
+    version: 2,
     mode: "cloud",
     serverUrl: DEFAULT_CLOUD_URL,
+    sites: defaultSites(),
   };
 }
 
@@ -48,13 +142,23 @@ export function loadSettings(root) {
   if (fs.existsSync(file)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      const sites = [];
+      for (const site of normalizeSites(parsed.sites)) {
+        const url = migrateLegacyUrl(site.url);
+        if (!sites.some((existing) => existing.url === url)) {
+          sites.push({ ...site, url });
+        }
+      }
+      const serverUrl =
+        typeof parsed.serverUrl === "string" && parsed.serverUrl.trim()
+          ? migrateLegacyUrl(normalizeServerUrl(parsed.serverUrl))
+          : settings.serverUrl;
+
       settings = {
-        version: 1,
+        version: 2,
         mode: normalizeMode(parsed.mode),
-        serverUrl:
-          typeof parsed.serverUrl === "string" && parsed.serverUrl.trim()
-            ? normalizeServerUrl(parsed.serverUrl)
-            : settings.serverUrl,
+        serverUrl,
+        sites,
       };
     } catch {
       settings = defaultSettings();
@@ -78,9 +182,10 @@ export function saveSettings(root, settings) {
   const file = settingsPath(root);
   const temporaryFile = `${file}.${process.pid}.tmp`;
   const normalized = {
-    version: 1,
+    version: 2,
     mode: normalizeMode(settings.mode),
     serverUrl: normalizeServerUrl(settings.serverUrl || DEFAULT_CLOUD_URL),
+    sites: settings.sites ? validateSites(settings.sites) : defaultSites(),
   };
 
   fs.writeFileSync(temporaryFile, `${JSON.stringify(normalized, null, 2)}\n`, {
