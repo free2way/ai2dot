@@ -6,7 +6,7 @@ import { defaultSettings, loadSettings, saveSettings } from "./lib/settings.mjs"
 
 vi.mock("electron", async () => {
   const { EventEmitter } = await import("node:events");
-  const state = { windows: [], handlers: new Map(), menu: null };
+  const state = { windows: [], views: [], handlers: new Map(), menu: null };
   const app = Object.assign(new EventEmitter(), {
     isPackaged: true,
     setName: vi.fn(), setPath: vi.fn(), getPath: vi.fn(),
@@ -19,21 +19,40 @@ vi.mock("electron", async () => {
     setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn(),
     clearStorageData: vi.fn(), clearCache: vi.fn(), clearAuthCache: vi.fn(),
   };
+  function contents() {
+    return Object.assign(new EventEmitter(), {
+      mainFrame: {},
+      setWindowOpenHandler: vi.fn(), send: vi.fn(),
+      loadURL: vi.fn(async () => {}), focus: vi.fn(),
+      isDestroyed: () => false, close: vi.fn(),
+      reload: vi.fn(), reloadIgnoringCache: vi.fn(),
+    });
+  }
+  class WebContentsView {
+    constructor(options) {
+      this.options = options;
+      this.webContents = contents();
+      this.setBounds = vi.fn();
+      state.views.push(this);
+    }
+  }
   class BrowserWindow extends EventEmitter {
     constructor(options) {
       super();
       this.options = options;
-      this.webContents = Object.assign(new EventEmitter(), {
-        setWindowOpenHandler: vi.fn(),
-      });
+      this.webContents = contents();
+      this.contentView = { addChildView: vi.fn() };
+      this.getContentSize = vi.fn(() => [1440, 900]);
       this.loadURL = vi.fn(async () => {});
+      this.loadFile = vi.fn(async () => {});
       this.setTitle = vi.fn();
+      this.focus = vi.fn();
       state.windows.push(this);
     }
     isDestroyed() { return false; }
   }
   return {
-    app, BrowserWindow,
+    app, BrowserWindow, WebContentsView,
     ipcMain: {
       handle: (name, handler) => state.handlers.set(name, handler),
       on: vi.fn(),
@@ -62,6 +81,7 @@ beforeEach(() => {
   app.getPath.mockReturnValue(directory);
   app.removeAllListeners();
   reviewState.windows.length = 0;
+  reviewState.views.length = 0;
   reviewState.handlers.clear();
 });
 
@@ -75,7 +95,7 @@ afterEach(() => {
 async function boot(settings = defaultSettings()) {
   saveSettings(directory, settings);
   await import("./main.mjs");
-  await vi.waitFor(() => expect(reviewState.windows).toHaveLength(2));
+  await vi.waitFor(() => expect(reviewState.views[0]?.webContents.loadURL).toHaveBeenCalled());
   return reviewState.windows[1];
 }
 
@@ -105,7 +125,7 @@ describe("active desktop login site", () => {
 
     const logout = reviewState.menu.find((item) => item.label === "账号").submenu[0];
     logout.click();
-    await vi.waitFor(() => expect(window.loadURL).toHaveBeenLastCalledWith(`${oldUrl}/sign-in`));
+    await vi.waitFor(() => expect(reviewState.views[0].webContents.loadURL).toHaveBeenLastCalledWith(`${oldUrl}/sign-in`));
 
     // The replacement URL is applied only after an explicit selection.
     await invoke("site:choose", { mode: "cloud", serverUrl: sites[1].url });
@@ -123,7 +143,7 @@ describe("active desktop login site", () => {
     expect(loadSettings(directory).serverUrl).toBe(defaultSettings().serverUrl);
     expect(result.current.serverUrl).toBe("https://custom.example.com");
     expect(window.setTitle).toHaveBeenLastCalledWith("ai2dot — custom.example.com");
-    expect(window.loadURL).toHaveBeenLastCalledWith("https://custom.example.com/sign-in");
+    expect(reviewState.views[0].webContents.loadURL).toHaveBeenLastCalledWith("https://custom.example.com/sign-in");
     expect(app.relaunch).not.toHaveBeenCalled();
   });
 
@@ -133,5 +153,52 @@ describe("active desktop login site", () => {
     await invoke("sites:save", sites);
     expect(window.setTitle).toHaveBeenLastCalledWith("ai2dot — 本地 Docker新版 · dot.ai2note.com");
     expect(siteMenu().filter((item) => item.checked)).toHaveLength(1);
+  });
+});
+
+describe("persistent desktop site bar", () => {
+  function shellEvent() {
+    const sender = reviewState.windows[1].webContents;
+    return { sender, senderFrame: sender.mainFrame };
+  }
+
+  it("keeps a local shell above the hosted page through login and resize", async () => {
+    const window = await boot();
+    const view = reviewState.views[0];
+    expect(window.loadFile).toHaveBeenCalledWith(expect.stringMatching(/lib\/shell\.html$/));
+    expect(window.options.webPreferences.preload).toMatch(/lib\/shell-preload\.cjs$/);
+    expect(view.options.webPreferences.preload).toBeUndefined();
+    expect(view.options.webPreferences.partition).toBe("persist:ai2dot-cloud");
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 64, width: 1440, height: 836 });
+
+    await view.webContents.loadURL("https://dot.ai2note.com/workspace");
+    expect(window.loadFile).toHaveBeenCalledOnce();
+    const status = reviewState.handlers.get("desktop:status")(shellEvent());
+    expect(status).toMatchObject({ mode: "cloud", address: "https://dot.ai2note.com", label: "本地 Docker · dot.ai2note.com" });
+
+    window.getContentSize.mockReturnValue([1100, 700]);
+    window.emit("resize");
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 64, width: 1100, height: 636 });
+    window.emit("closed");
+    expect(view.webContents.close).toHaveBeenCalledOnce();
+  });
+
+  it.each(["picker", "manage"])("opens the %s dialog from the site bar", async (initialView) => {
+    await boot();
+    reviewState.handlers.get("desktop:open-sites")(shellEvent(), initialView);
+    expect(reviewState.windows[2].loadFile).toHaveBeenCalledWith(
+      expect.stringMatching(/lib\/site-picker\.html$/), { query: { view: initialView } },
+    );
+  });
+
+  it("rejects privileged toolbar actions from hosted pages and subframes", async () => {
+    const window = await boot();
+    const remote = reviewState.views[0].webContents;
+    for (const name of ["desktop:status", "desktop:open-sites"]) {
+      const handler = reviewState.handlers.get(name);
+      expect(() => handler({ sender: remote, senderFrame: remote.mainFrame }, "manage")).toThrow("site bar");
+      expect(() => handler({ sender: window.webContents, senderFrame: {} }, "manage")).toThrow("site bar");
+    }
+    expect(reviewState.windows).toHaveLength(2);
   });
 });

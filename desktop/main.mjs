@@ -7,9 +7,11 @@ import {
   Menu,
   session,
   shell,
+  WebContentsView,
 } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createSessionToken,
   getPaths,
@@ -36,6 +38,8 @@ const CLOUD_PARTITION = "persist:ai2dot-cloud";
 const LOCAL_PARTITION = "persist:ai2dot-local";
 const DEV_URL = process.env.AI2DOT_DESKTOP_DEV_URL?.trim() || "";
 const DEV_MODE = !app.isPackaged || Boolean(DEV_URL);
+const SITE_BAR_HEIGHT = 64;
+const DESKTOP_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // Remote scripts are never allowed. Inline/eval remain because the Next.js
 // runtime bootstrap relies on them. Only applied to the local runtime; the
@@ -65,6 +69,7 @@ let activeServerUrl = "";
 let appOrigin = "";
 let startUrl = "";
 let mainWindow = null;
+let mainView = null;
 let splashWindow = null;
 let sitePickerWindow = null;
 let firstRunPicker = false;
@@ -178,6 +183,15 @@ function currentSiteSelection() {
 function updateWindowTitle() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.setTitle(`ai2dot — ${currentSiteLabel()}`);
+  mainWindow.webContents.send("desktop:status-changed", desktopStatus());
+}
+
+function desktopStatus() {
+  return {
+    ...currentSiteSelection(),
+    label: currentSiteLabel(),
+    address: runtimeMode === "local" ? "本机数据库 · 离线模式" : activeServerUrl,
+  };
 }
 
 function persistSiteSelection(mode, serverUrl) {
@@ -418,6 +432,21 @@ async function createMainWindow() {
     title: "ai2dot",
     backgroundColor: "#07090c",
     webPreferences: {
+      preload: desktopLibPath("shell-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+    },
+  });
+
+  // The site bar belongs to a local shell, so hosted pages cannot remove it
+  // or gain access to its privileged bridge after login or navigation.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+  mainWindow.webContents.on("will-redirect", (event) => event.preventDefault());
+  const view = new WebContentsView({
+    webPreferences: {
       partition,
       contextIsolation: true,
       nodeIntegration: false,
@@ -426,8 +455,16 @@ async function createMainWindow() {
       spellcheck: true,
     },
   });
-
-  hardenWebContents(mainWindow.webContents);
+  mainView = view;
+  mainWindow.contentView.addChildView(view);
+  const resizeView = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const [width, height] = mainWindow.getContentSize();
+    view.setBounds({ x: 0, y: SITE_BAR_HEIGHT, width, height: Math.max(0, height - SITE_BAR_HEIGHT) });
+  };
+  resizeView();
+  mainWindow.on("resize", resizeView);
+  hardenWebContents(view.webContents);
   updateWindowTitle();
 
   mainWindow.on("page-title-updated", (event) => {
@@ -443,10 +480,12 @@ async function createMainWindow() {
   });
 
   mainWindow.on("closed", () => {
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+    if (mainView === view) mainView = null;
     mainWindow = null;
   });
 
-  mainWindow.webContents.on(
+  view.webContents.on(
     "render-process-gone",
     (_event, details) => {
       logLine(`renderer gone: ${JSON.stringify(details)}`);
@@ -459,7 +498,7 @@ async function createMainWindow() {
     },
   );
 
-  mainWindow.webContents.on(
+  view.webContents.on(
     "did-fail-load",
     (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return;
@@ -477,7 +516,7 @@ async function createMainWindow() {
         })
         .then(({ response }) => {
           if (response === 0) {
-            void mainWindow?.loadURL(startUrl);
+            void mainView?.webContents.loadURL(startUrl);
           } else if (response === 1) {
             openSitePicker();
           } else {
@@ -488,7 +527,9 @@ async function createMainWindow() {
   );
 
   try {
-    await mainWindow.loadURL(startUrl);
+    await mainWindow.loadFile(desktopLibPath("shell.html"));
+    await view.webContents.loadURL(startUrl);
+    view.webContents.focus();
   } catch (error) {
     // did-fail-load already presents retry/settings actions.
     logLine(`initial load failed: ${error}`);
@@ -497,11 +538,11 @@ async function createMainWindow() {
 
 async function maybeCaptureWindow() {
   const target = process.env.AI2DOT_DESKTOP_CAPTURE?.trim();
-  if (!target || !mainWindow) return;
+  if (!target || !mainView) return;
 
   await new Promise((resolve) => setTimeout(resolve, 2_500));
   try {
-    const image = await mainWindow.webContents.capturePage();
+    const image = await mainView.webContents.capturePage();
     fs.writeFileSync(target, image.toPNG());
     logLine(`captured window to ${target}`);
   } catch (error) {
@@ -514,9 +555,7 @@ async function maybeCaptureWindow() {
 }
 
 function desktopLibPath(name) {
-  return app.isPackaged
-    ? path.join(app.getAppPath(), "desktop", "lib", name)
-    : path.join(app.getAppPath(), "lib", name);
+  return path.join(DESKTOP_DIR, "lib", name);
 }
 
 function openSitePicker({ firstRun = false, initialView = "picker" } = {}) {
@@ -560,6 +599,24 @@ function openSitePicker({ firstRun = false, initialView = "picker" } = {}) {
 }
 
 function registerSitePickerIpc() {
+  function assertShellSender(event) {
+    if (
+      !mainWindow || event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame
+    ) {
+      throw new Error("This action is only available from the desktop site bar.");
+    }
+  }
+
+  ipcMain.handle("desktop:status", (event) => {
+    assertShellSender(event);
+    return desktopStatus();
+  });
+  ipcMain.handle("desktop:open-sites", (event, view) => {
+    assertShellSender(event);
+    openSitePicker({ initialView: view === "manage" ? "manage" : "picker" });
+  });
+
   ipcMain.handle("sites:list", () => {
     const current = settings ?? loadSettings(paths.root);
     settings = current;
@@ -735,8 +792,8 @@ async function signOutCloud() {
     // Not every Electron build exposes the auth cache.
   }
   logLine("cloud session cleared");
-  if (mainWindow) {
-    await mainWindow.loadURL(`${activeServerUrl}/sign-in`);
+  if (mainView) {
+    await mainView.webContents.loadURL(`${activeServerUrl}/sign-in`);
   }
 }
 
@@ -783,14 +840,14 @@ function buildMenu() {
         { label: "退出登录", click: () => void signOutCloud() },
         {
           label: "重新加载",
-          click: () => void mainWindow?.reload(),
+          click: () => mainView?.webContents.reload(),
         },
       ]
     : [
         { label: "本地登录与密码…", click: showCredentials },
         {
           label: "重新加载",
-          click: () => void mainWindow?.reload(),
+          click: () => mainView?.webContents.reload(),
         },
       ];
 
@@ -858,13 +915,13 @@ function buildMenu() {
     {
       label: "查看",
       submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        ...(DEV_MODE ? [{ role: "toggleDevTools" }] : []),
+        { label: "重新加载", accelerator: "CmdOrCtrl+R", click: () => mainView?.webContents.reload() },
+        { label: "强制重新加载", accelerator: "CmdOrCtrl+Shift+R", click: () => mainView?.webContents.reloadIgnoringCache() },
+        ...(DEV_MODE ? [{ label: "开发者工具", accelerator: "Alt+CmdOrCtrl+I", click: () => mainView?.webContents.toggleDevTools() }] : []),
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        { label: "实际大小", accelerator: "CmdOrCtrl+0", click: () => mainView?.webContents.setZoomLevel(0) },
+        { label: "放大", accelerator: "CmdOrCtrl+Plus", click: () => { if (mainView) mainView.webContents.setZoomLevel(mainView.webContents.getZoomLevel() + 0.5); } },
+        { label: "缩小", accelerator: "CmdOrCtrl+-", click: () => { if (mainView) mainView.webContents.setZoomLevel(mainView.webContents.getZoomLevel() - 0.5); } },
         { type: "separator" },
         { role: "togglefullscreen" },
       ],

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <title>ai2dot</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #07090c; color: #e7ece3; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+    .site-bar { height: 64px; display: flex; align-items: center; gap: 16px; padding: 0 22px; border-bottom: 1px solid #273022; background: #10150f; }
+    .caption { display: flex; align-items: center; gap: 8px; flex-shrink: 0; color: #a5b29f; font-size: 12px; }
+    .caption::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #b7f34a; }
+    .site { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+    .site strong, .site small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .site strong { font-size: 13px; font-weight: 600; }
+    .site small { color: #94a38d; font-size: 11px; }
+    .actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+    button { padding: 8px 13px; border: 1px solid #33432a; border-radius: 8px; background: transparent; color: #d0dac9; font: inherit; font-size: 12px; cursor: pointer; }
+    button:hover { background: #1e2a18; border-color: #91b964; }
+    button:focus-visible { outline: 2px solid #b7f34a; outline-offset: 2px; }
+    .switch { background: #b7f34a; border-color: #b7f34a; color: #162109; font-weight: 600; }
+    .switch:hover { background: #c6f764; }
+    .status { padding: 20px; color: #94a38d; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header class="site-bar" aria-label="当前登录站点">
+    <span class="caption">当前站点</span>
+    <div class="site" aria-live="polite">
+      <strong id="siteLabel">正在读取站点…</strong>
+      <small id="siteAddress"></small>
+    </div>
+    <div class="actions">
+      <button class="switch" id="switchSite" type="button">切换站点</button>
+      <button id="manageSites" type="button">管理站点</button>
+    </div>
+  </header>
+  <p class="status" id="status">正在加载工作台…</p>
+  <script>
+    const label = document.getElementById("siteLabel");
+    const address = document.getElementById("siteAddress");
+    const notice = document.getElementById("status");
+    function render(status) {
+      label.textContent = status.label;
+      address.textContent = status.address;
+      address.title = status.address;
+    }
+    function fail(error) { notice.textContent = `无法读取桌面站点：${error.message || error}`; }
+    document.getElementById("switchSite").addEventListener("click", () => window.desktopShell.openSites("picker").catch(fail));
+    document.getElementById("manageSites").addEventListener("click", () => window.desktopShell.openSites("manage").catch(fail));
+    window.desktopShell.onStatus(render);
+    window.desktopShell.getStatus().then(render).catch(fail);
+  </script>
+</body>
+</html>
