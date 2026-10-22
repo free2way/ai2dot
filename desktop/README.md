@@ -5,7 +5,7 @@ macOS 桌面版支持两种模式：
 - **云端模式（默认）**：Electron 打开 Web 工作台（默认 `https://dot.ai2note.com`），登录、会话、知识库与 Web 完全一致。Web 用 Clerk 就用 Clerk，用本地账号就用本地账号，桌面端不另建账号体系。
 - **本地模式（可选）**：内嵌 Next.js standalone + PGlite，数据保存在本机，可离线打开；启动时使用本机生成的本地账号自动登录。
 
-两种模式可以在菜单 `账号` 中切换，切换会重启应用，彼此数据不会删除。
+两种模式可以在菜单 `站点` 中切换，切换会重启应用，彼此数据不会删除。
 
 ## 开发
 
@@ -43,14 +43,21 @@ npm run desktop:build
 
 产物位于 `desktop/release/`：
 
-- `ai2dot-0.1.1-arm64.dmg`（当前机器架构）
-- `ai2dot-0.1.1-arm64.zip`
+- `ai2dot-0.1.2-arm64.dmg`（当前机器架构）
+- `ai2dot-0.1.2-arm64.zip`
 
 本轮为未签名构建，首次打开需要右键点击应用选择“打开”，或执行：
 
 ```bash
 xattr -cr "/Applications/ai2dot.app"
 ```
+
+## 当前站点
+
+窗口标题会显示当前站点，例如 `ai2dot — 本地 Docker · dot.ai2note.com` 或 `ai2dot — 本地模式`。菜单 `站点` 的第一项也会显示 `当前站点：…`，并带有当前站点的勾选状态。
+
+- 切换站点：菜单 `站点` 直接选择站点/本地模式，或 `切换登录站点…`（`Cmd+Shift+S`）
+- 管理站点：菜单 `站点 → 管理站点…`
 
 ## 登录与站点选择
 
@@ -60,7 +67,7 @@ xattr -cr "/Applications/ai2dot.app"
 - **dot.ai2note.com**：本地 Docker 部署，账号与数据跟随该站点（默认选中）。
 - **本地模式**：使用本机 PGlite 数据库，离线可用，账号为本机独立账号。
 
-选择后会重启应用并记住选择。之后可随时通过菜单 `账号 → 切换登录站点…` 修改。
+选择后会重启应用并记住选择。之后可随时通过菜单 `站点` 修改。
 
 窗口底部的 **管理站点** 可以新增、编辑或删除站点（最多 10 个），也可以恢复默认站点。站点地址必须使用 HTTPS；本机调试允许 `http://127.0.0.1`。
 
@@ -80,7 +87,7 @@ Clerk 的第三方社交登录（如 Google）在 Electron 内嵌窗口里可能
 | Next 服务日志（仅本地模式） | `~/Library/Application Support/ai2dot/logs/server.log` |
 | Electron 日志 | `~/Library/Application Support/ai2dot/logs/electron.log` |
 
-切换站点优先使用菜单 `账号 → 切换登录站点…`。如需自定义地址，使用菜单 `ai2dot → 打开设置文件（云端地址）` 修改 `serverUrl` 后重启。默认地址为 `AI2DOT_DESKTOP_SERVER_URL` 或 `https://dot.ai2note.com`。
+切换站点使用菜单 `站点 → 切换登录站点…`（快捷键 `Cmd+Shift+S`），也可以直接在 `站点` 菜单里勾选已配置站点或本地模式。如需自定义地址，使用 `站点 → 管理站点…`。默认地址为 `AI2DOT_DESKTOP_SERVER_URL` 或 `https://dot.ai2note.com`。
 
 ## 运行方式
 

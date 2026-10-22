@@ -6,4 +6,7 @@ contextBridge.exposeInMainWorld("sitePicker", {
   resetSites: () => ipcRenderer.invoke("sites:reset"),
   choose: (payload) => ipcRenderer.invoke("site:choose", payload),
   cancel: () => ipcRenderer.send("site:cancel"),
+  onView: (callback) => {
+    ipcRenderer.on("site:view", (_event, view) => callback(view));
+  },
 });

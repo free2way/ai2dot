@@ -9,8 +9,8 @@
       <stop offset="1" stop-color="#b7f34a" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <rect width="1024" height="1024" rx="232" fill="url(#bg)"/>
-  <rect x="14" y="14" width="996" height="996" rx="220" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="8"/>
+  <rect width="1024" height="1024" fill="#05070a"/>
+  <rect x="40" y="40" width="944" height="944" rx="200" fill="url(#bg)"/>
   <circle cx="512" cy="512" r="340" fill="url(#glow)"/>
   <circle cx="512" cy="512" r="286" fill="none" stroke="#b7f34a" stroke-opacity="0.26" stroke-width="26"/>
   <circle cx="512" cy="512" r="178" fill="none" stroke="#b7f34a" stroke-width="58"/>

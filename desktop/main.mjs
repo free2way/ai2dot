@@ -146,6 +146,78 @@ function isAllowedAuthNavigation(url) {
   }
 }
 
+function siteHost(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return String(url || "");
+  }
+}
+
+function currentSiteLabel() {
+  if (!settings) return "未选择";
+  if (runtimeMode === "local") return "本地模式";
+  const site = settings.sites?.find(
+    (item) => item.url === settings.serverUrl,
+  );
+  return site
+    ? `${site.name} · ${siteHost(site.url)}`
+    : siteHost(settings.serverUrl);
+}
+
+function updateWindowTitle() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.setTitle(`ai2dot — ${currentSiteLabel()}`);
+}
+
+function persistSiteSelection(mode, serverUrl) {
+  if (!settings) settings = loadSettings(paths.root);
+  const nextMode = mode === "local" ? "local" : "cloud";
+  const nextServerUrl =
+    nextMode === "cloud"
+      ? normalizeServerUrl(serverUrl || settings.serverUrl)
+      : settings.serverUrl;
+
+  settings = saveSettings(paths.root, {
+    ...settings,
+    mode: nextMode,
+    serverUrl: nextServerUrl,
+  });
+  logLine(`site selected mode=${nextMode} url=${nextServerUrl}`);
+  Menu.setApplicationMenu(buildMenu());
+  updateWindowTitle();
+  return settings;
+}
+
+function relaunchForSiteChange() {
+  if (DEV_MODE) {
+    dialog.showMessageBoxSync({
+      type: "info",
+      title: "开发模式",
+      message: "站点已保存，请退出并重新运行 npm run desktop:dev。",
+      buttons: ["继续"],
+    });
+    return false;
+  }
+
+  app.relaunch();
+  app.quit();
+  return true;
+}
+
+function applySiteFromMenu(mode, serverUrl) {
+  try {
+    persistSiteSelection(mode, serverUrl);
+  } catch (error) {
+    dialog.showErrorBox(
+      "无法切换站点",
+      error instanceof Error ? error.message : String(error),
+    );
+    return;
+  }
+  relaunchForSiteChange();
+}
+
 function appRootPath() {
   if (process.env.AI2DOT_DESKTOP_APP_ROOT?.trim()) {
     return path.resolve(process.env.AI2DOT_DESKTOP_APP_ROOT.trim());
@@ -346,9 +418,16 @@ async function createMainWindow() {
   });
 
   hardenWebContents(mainWindow.webContents);
+  updateWindowTitle();
+
+  mainWindow.on("page-title-updated", (event) => {
+    event.preventDefault();
+    updateWindowTitle();
+  });
 
   mainWindow.once("ready-to-show", () => {
     closeSplash();
+    updateWindowTitle();
     mainWindow?.show();
     void maybeCaptureWindow();
   });
@@ -430,9 +509,10 @@ function desktopLibPath(name) {
     : path.join(app.getAppPath(), "lib", name);
 }
 
-function openSitePicker({ firstRun = false } = {}) {
+function openSitePicker({ firstRun = false, initialView = "picker" } = {}) {
   if (sitePickerWindow && !sitePickerWindow.isDestroyed()) {
     sitePickerWindow.focus();
+    sitePickerWindow.webContents.send("site:view", initialView);
     return;
   }
 
@@ -464,7 +544,9 @@ function openSitePicker({ firstRun = false } = {}) {
     firstRunPicker = false;
     if (wasFirstRun && !quitting) app.quit();
   });
-  sitePickerWindow.loadFile(desktopLibPath("site-picker.html"));
+  sitePickerWindow.loadFile(desktopLibPath("site-picker.html"), {
+    query: { view: initialView },
+  });
 }
 
 function registerSitePickerIpc() {
@@ -491,6 +573,8 @@ function registerSitePickerIpc() {
 
       settings = saveSettings(paths.root, { ...settings, sites, serverUrl });
       logLine(`sites saved count=${sites.length}`);
+      Menu.setApplicationMenu(buildMenu());
+      updateWindowTitle();
       return {
         ok: true,
         sites: settings.sites,
@@ -513,6 +597,8 @@ function registerSitePickerIpc() {
       serverUrl: DEFAULT_CLOUD_URL,
     });
     logLine("sites reset to defaults");
+    Menu.setApplicationMenu(buildMenu());
+    updateWindowTitle();
     return {
       ok: true,
       sites: settings.sites,
@@ -522,29 +608,14 @@ function registerSitePickerIpc() {
 
   ipcMain.handle("site:choose", async (_event, payload) => {
     try {
-      if (!settings) settings = loadSettings(paths.root);
       const mode = payload?.mode === "local" ? "local" : "cloud";
-      const serverUrl =
-        mode === "cloud"
-          ? normalizeServerUrl(payload?.serverUrl || DEFAULT_CLOUD_URL)
-          : settings.serverUrl;
+      persistSiteSelection(mode, payload?.serverUrl);
 
-      settings = saveSettings(paths.root, { ...settings, mode, serverUrl });
-      logLine(`site selected mode=${mode} url=${serverUrl}`);
-
-      if (DEV_MODE) {
-        dialog.showMessageBoxSync({
-          type: "info",
-          title: "开发模式",
-          message: "站点已保存，请退出并重新运行 npm run desktop:dev。",
-          buttons: ["继续"],
-        });
+      if (!relaunchForSiteChange()) {
         sitePickerWindow?.close();
         return { ok: true, requiresRestart: true };
       }
 
-      app.relaunch();
-      app.quit();
       return { ok: true };
     } catch (error) {
       return {
@@ -659,6 +730,41 @@ async function signOutCloud() {
   }
 }
 
+function siteMenuItems() {
+  const items = [
+    { label: `当前站点：${currentSiteLabel()}`, enabled: false },
+    { type: "separator" },
+    {
+      label: "切换登录站点…",
+      accelerator: "CmdOrCtrl+Shift+S",
+      click: () => openSitePicker(),
+    },
+    {
+      label: "管理站点…",
+      click: () => openSitePicker({ initialView: "manage" }),
+    },
+    { type: "separator" },
+  ];
+
+  for (const site of settings?.sites ?? []) {
+    items.push({
+      label: `${site.name} · ${siteHost(site.url)}`,
+      type: "radio",
+      checked: runtimeMode === "cloud" && settings?.serverUrl === site.url,
+      click: () => applySiteFromMenu("cloud", site.url),
+    });
+  }
+
+  items.push({
+    label: "本地模式（离线）",
+    type: "radio",
+    checked: runtimeMode === "local",
+    click: () => applySiteFromMenu("local", settings?.serverUrl),
+  });
+
+  return items;
+}
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const cloud = runtimeMode === "cloud";
@@ -733,7 +839,11 @@ function buildMenu() {
     },
     {
       label: "账号",
-      submenu: [...accountItems, { type: "separator" }, siteItem],
+      submenu: accountItems,
+    },
+    {
+      label: "站点",
+      submenu: siteMenuItems(),
     },
     {
       label: "查看",

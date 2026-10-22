@@ -322,10 +322,17 @@
       showPicker();
     });
 
+    window.sitePicker.onView?.((view) => {
+      if (view === "manage") showManage();
+      else showPicker();
+    });
+
+    const initialView = new URLSearchParams(location.search).get("view");
     window.sitePicker.listSites().then((data) => {
       state.sites = data.sites;
       state.current = data.current;
-      renderPicker();
+      if (initialView === "manage") showManage();
+      else renderPicker();
     }).catch((error) => {
       setStatus(pickerStatus, String(error?.message || error));
     });
