@@ -1,5 +1,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const {
+  runtimeCopyFilter,
+  assertNoEnvironmentFiles,
+} = require("../lib/runtime-files.cjs");
 
 /**
  * electron-builder's extraResources filter drops node_modules, which the
@@ -24,7 +28,12 @@ module.exports = async function afterPack(context) {
   }
 
   fs.rmSync(destination, { recursive: true, force: true });
-  fs.cpSync(source, destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    force: true,
+    filter: runtimeCopyFilter,
+  });
+  assertNoEnvironmentFiles(destination);
 
   for (const required of [
     "server.js",

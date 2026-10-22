@@ -60,6 +60,8 @@ const paths = getPaths(app.getPath("userData"));
 let settings = null;
 let config = null;
 let runtimeMode = "cloud";
+// Editing saved sites must not change the identity of the running window.
+let activeServerUrl = "";
 let appOrigin = "";
 let startUrl = "";
 let mainWindow = null;
@@ -157,12 +159,20 @@ function siteHost(url) {
 function currentSiteLabel() {
   if (!settings) return "未选择";
   if (runtimeMode === "local") return "本地模式";
+  const serverUrl = activeServerUrl || settings.serverUrl;
   const site = settings.sites?.find(
-    (item) => item.url === settings.serverUrl,
+    (item) => item.url === serverUrl,
   );
   return site
     ? `${site.name} · ${siteHost(site.url)}`
-    : siteHost(settings.serverUrl);
+    : siteHost(serverUrl);
+}
+
+function currentSiteSelection() {
+  return {
+    mode: startUrl ? runtimeMode : settings.mode,
+    serverUrl: activeServerUrl || settings.serverUrl,
+  };
 }
 
 function updateWindowTitle() {
@@ -311,7 +321,7 @@ async function setLocalSessionCookie() {
 
 async function hasCloudSession() {
   const ses = session.fromPartition(CLOUD_PARTITION);
-  const cookies = await ses.cookies.get({ url: settings.serverUrl });
+  const cookies = await ses.cookies.get({ url: activeServerUrl });
   return cookies.some(
     (cookie) =>
       cookie.name === "__session" ||
@@ -555,7 +565,7 @@ function registerSitePickerIpc() {
     settings = current;
     return {
       sites: current.sites,
-      current: { mode: current.mode, serverUrl: current.serverUrl },
+      current: currentSiteSelection(),
     };
   });
 
@@ -578,7 +588,7 @@ function registerSitePickerIpc() {
       return {
         ok: true,
         sites: settings.sites,
-        current: { mode: settings.mode, serverUrl: settings.serverUrl },
+        current: currentSiteSelection(),
       };
     } catch (error) {
       return {
@@ -602,7 +612,7 @@ function registerSitePickerIpc() {
     return {
       ok: true,
       sites: settings.sites,
-      current: { mode: settings.mode, serverUrl: settings.serverUrl },
+      current: currentSiteSelection(),
     };
   });
 
@@ -726,7 +736,7 @@ async function signOutCloud() {
   }
   logLine("cloud session cleared");
   if (mainWindow) {
-    await mainWindow.loadURL(`${settings.serverUrl}/sign-in`);
+    await mainWindow.loadURL(`${activeServerUrl}/sign-in`);
   }
 }
 
@@ -750,7 +760,7 @@ function siteMenuItems() {
     items.push({
       label: `${site.name} · ${siteHost(site.url)}`,
       type: "radio",
-      checked: runtimeMode === "cloud" && settings?.serverUrl === site.url,
+      checked: runtimeMode === "cloud" && activeServerUrl === site.url,
       click: () => applySiteFromMenu("cloud", site.url),
     });
   }
@@ -911,9 +921,10 @@ async function boot() {
       createSplash("正在启动本地工作台");
     } else if (settings.mode === "cloud") {
       runtimeMode = "cloud";
-      appOrigin = new URL(settings.serverUrl).origin;
+      activeServerUrl = settings.serverUrl;
+      appOrigin = new URL(activeServerUrl).origin;
       const signedIn = await hasCloudSession();
-      startUrl = `${settings.serverUrl}${signedIn ? "/workspace" : "/sign-in"}`;
+      startUrl = `${activeServerUrl}${signedIn ? "/workspace" : "/sign-in"}`;
       logLine(`using cloud server ${startUrl}`);
       createSplash("正在连接云端工作台");
     } else {

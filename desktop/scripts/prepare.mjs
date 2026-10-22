@@ -2,6 +2,9 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import runtimeFiles from "../lib/runtime-files.cjs";
+
+const { runtimeCopyFilter, assertNoEnvironmentFiles } = runtimeFiles;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "../..");
@@ -10,7 +13,11 @@ const runtimeDir = path.join(desktopDir, ".runtime");
 const standaloneDir = path.join(root, ".next", "standalone");
 
 function copy(source, destination) {
-  fs.cpSync(source, destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    force: true,
+    filter: runtimeCopyFilter,
+  });
 }
 
 function requirePath(target, label) {
@@ -67,6 +74,7 @@ const requiredAssets = [
 for (const asset of requiredAssets) {
   requirePath(asset, "runtime asset");
 }
+assertNoEnvironmentFiles(runtimeDir);
 
 const size = execFileSync("du", ["-sh", runtimeDir], { encoding: "utf8" }).trim();
 console.log(`[desktop:prepare] runtime ready: ${size}`);

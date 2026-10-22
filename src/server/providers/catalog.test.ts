@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertSafeProviderBaseUrl,
+  fetchProviderCatalog,
   isDesktopReachableAddress,
   isPrivateNetworkAddress,
   parseProviderCatalog,
@@ -60,6 +61,54 @@ describe("parseProviderCatalog", () => {
       contextWindow: 200000,
       capabilities: ["text", "image", "files", "reasoning"],
     });
+  });
+});
+
+describe("provider catalog redirects", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mockRedirects(locations: string[]) {
+    const requests: { url: string; authorization: string | null }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers);
+      requests.push({ url, authorization: headers.get("authorization") });
+      const location = locations[requests.length - 1];
+      return location
+        ? new Response(null, { status: 302, headers: { location } })
+        : Response.json({ data: [] });
+    }));
+    return requests;
+  }
+
+  const provider = {
+    type: "openai_compatible" as const,
+    baseUrl: "https://1.1.1.1/v1",
+    secret: "test-provider-key",
+  };
+
+  it("keeps credentials for a relative redirect on the same origin", async () => {
+    const requests = mockRedirects(["/v2/models"]);
+    await expect(fetchProviderCatalog(provider)).resolves.toEqual([]);
+    expect(requests.map((request) => request.authorization)).toEqual([
+      "Bearer test-provider-key", "Bearer test-provider-key",
+    ]);
+  });
+
+  it.each(["https://8.8.8.8/models", "https://1.1.1.1:8443/models"])(
+    "drops credentials when redirecting to %s, including a redirect back",
+    async (location) => {
+      const requests = mockRedirects([location, "/redirect", "https://1.1.1.1/models"]);
+      await fetchProviderCatalog(provider);
+      expect(requests.map((request) => request.authorization)).toEqual([
+        "Bearer test-provider-key", null, null, null,
+      ]);
+    },
+  );
+
+  it("rejects redirects to private addresses before making another request", async () => {
+    const requests = mockRedirects(["https://127.0.0.1/models"]);
+    await expect(fetchProviderCatalog(provider)).rejects.toThrow("Private");
+    expect(requests).toHaveLength(1);
   });
 });
 

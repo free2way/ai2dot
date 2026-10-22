@@ -214,10 +214,12 @@ async function fetchWithValidatedRedirects(
   maxRedirects = 3,
 ) {
   let current = endpoint;
+  const headers = new Headers(init.headers);
 
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     const response = await fetch(current, {
       ...init,
+      headers,
       redirect: "manual",
     });
 
@@ -228,8 +230,14 @@ async function fetchWithValidatedRedirects(
       throw new Error("Provider catalog redirect is missing a location.");
     }
 
-    current = new URL(location, current).toString();
-    await assertSafeProviderBaseUrl(current);
+    const next = new URL(location, current);
+    await assertSafeProviderBaseUrl(next.toString());
+    if (new URL(current).origin !== next.origin) {
+      headers.delete("authorization");
+      headers.delete("proxy-authorization");
+      headers.delete("cookie");
+    }
+    current = next.toString();
   }
 
   throw new Error("Provider catalog redirected too many times.");

@@ -294,7 +294,7 @@
       state.current = result.current;
       state.editor = state.sites.map((site) => ({ ...site }));
       renderEditor();
-      setStatus(manageStatus, "已恢复默认站点，点击保存后返回。");
+      setStatus(manageStatus, "已恢复默认站点，选择站点后重启切换；当前连接保持不变。");
     });
 
     document.getElementById("saveSites").addEventListener("click", async () => {
@@ -318,7 +318,7 @@
       }
       state.sites = result.sites;
       state.current = result.current;
-      setStatus(pickerStatus, "站点已保存。");
+      setStatus(pickerStatus, "站点已保存。选择站点后应用将重启并切换；当前连接保持不变。");
       showPicker();
     });
 
