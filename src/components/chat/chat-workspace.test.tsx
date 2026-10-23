@@ -132,3 +132,17 @@ describe("Chat workspace recovery", () => {
     expect(screen.getByRole("status")).toHaveTextContent("当前浏览器不支持语音输入");
   });
 });
+
+it("automatically restores unsent text after remount and keeps identities separate", async () => {
+  const key = chatDraftKey(props.storageIdentity, props.initialConversationId, props.initialBranchId);
+  const first = render(<ChatWorkspace {...props} />);
+  await waitFor(() => expect(localStorage.getItem(key)).not.toBeNull());
+  fireEvent.change(screen.getByRole("textbox", { name: "消息" }), { target: { value: "unfinished text" } });
+  expect(JSON.parse(localStorage.getItem(key)!).input).toBe("unfinished text");
+  first.unmount();
+  const second = render(<ChatWorkspace {...props} />);
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("unfinished text"));
+  second.unmount();
+  render(<ChatWorkspace {...props} storageIdentity="workspace:other" />);
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue(""));
+});

@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("desktopShell", {
+  retry: () => ipcRenderer.invoke("desktop:retry"),
   getStatus: () => ipcRenderer.invoke("desktop:status"),
   openSites: (view) => ipcRenderer.invoke("desktop:open-sites", view),
   onStatus: (callback) => {

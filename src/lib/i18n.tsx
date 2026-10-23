@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { desktopBridge } from "@/lib/desktop-bridge";
+
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 export type Language = "zh" | "en";
 
@@ -525,13 +527,29 @@ const fallbackLanguageContext: LanguageContextValue = {
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>("zh");
+  const preferenceRevision = useRef(0);
 
   useEffect(() => {
+    let active = true;
+    let changed = false;
+    const bridge = desktopBridge();
+    const revision = preferenceRevision.current;
+    const apply = (next: Language) => {
+      if (!active) return;
+      changed = true;
+      setLanguageState(next);
+      try { window.localStorage.setItem(LANGUAGE_KEY, next); } catch {}
+    };
+    const unsubscribe = bridge?.onLanguage(apply);
     const timer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem(LANGUAGE_KEY);
-      if (saved === "zh" || saved === "en") setLanguageState(saved);
+      if (changed || preferenceRevision.current !== revision) return;
+      try {
+        const saved = window.localStorage.getItem(LANGUAGE_KEY) ?? window.localStorage.getItem("ai2dot_lang");
+        if (saved === "zh" || saved === "en") setLanguageState(saved);
+      } catch {}
     }, 0);
-    return () => window.clearTimeout(timer);
+    void bridge?.getLanguage().then((next) => { if (preferenceRevision.current === revision) apply(next); }).catch(() => {});
+    return () => { active = false; window.clearTimeout(timer); unsubscribe?.(); };
   }, []);
 
   useEffect(() => {
@@ -539,8 +557,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, [language]);
 
   const setLanguage = (next: Language) => {
+    preferenceRevision.current += 1;
     setLanguageState(next);
-    window.localStorage.setItem(LANGUAGE_KEY, next);
+    try { window.localStorage.setItem(LANGUAGE_KEY, next); } catch {}
+    void desktopBridge()?.setLanguage(next).catch(() => {});
   };
 
   const value = useMemo<LanguageContextValue>(() => ({

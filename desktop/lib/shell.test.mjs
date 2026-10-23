@@ -1,3 +1,4 @@
+import locale from "./locale.cjs";
 import fs from "node:fs";
 import { JSDOM } from "jsdom";
 import { expect, it, vi } from "vitest";
@@ -11,7 +12,7 @@ it("shows the active site and keeps both actions usable when the site changes", 
   };
   const dom = new JSDOM(fs.readFileSync(new URL("./shell.html", import.meta.url), "utf8"), {
     runScripts: "dangerously",
-    beforeParse(window) { window.desktopShell = bridge; },
+    beforeParse(window) { window.desktopShell = bridge; window.desktopT = locale.desktopT; },
   });
   try {
     await vi.waitFor(() => expect(dom.window.document.getElementById("siteLabel").textContent).toBe("线上版 · ai.ai2dot.com"));
@@ -20,7 +21,7 @@ it("shows the active site and keeps both actions usable when the site changes", 
     document.getElementById("switchSite").click();
     expect(bridge.openSites).toHaveBeenLastCalledWith("picker");
     document.getElementById("manageSites").click();
-    expect(bridge.openSites).toHaveBeenLastCalledWith("manage");
+    expect(bridge.openSites).toHaveBeenLastCalledWith("settings");
 
     update({ label: "本地模式", address: "本机数据库 · 离线模式" });
     expect(document.getElementById("siteLabel").textContent).toBe("本地模式");

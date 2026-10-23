@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
   <title>ai2dot</title>
   <style>
     :root { color-scheme: dark; }
@@ -21,34 +21,61 @@
     button:focus-visible { outline: 2px solid #b7f34a; outline-offset: 2px; }
     .switch { background: #b7f34a; border-color: #b7f34a; color: #162109; font-weight: 600; }
     .switch:hover { background: #c6f764; }
-    .status { padding: 20px; color: #94a38d; font-size: 13px; }
+    .status { max-width: 600px; margin: 15vh auto; padding: 30px; color: #94a38d; font-size: 14px; line-height: 1.7; text-align: center; }
+    .status h1 { color: #e7ece3; font-size: 24px; }
+    .status button { margin: 12px 4px; }
+    #connection { font-size: 11px; color: #a5b29f; }
+    #connection[data-state="offline"], #connection[data-state="error"] { color: #f0a26b; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
   <header class="site-bar" aria-label="当前登录站点">
-    <span class="caption">当前站点</span>
+    <span class="caption" data-i18n>当前站点</span>
     <div class="site" aria-live="polite">
       <strong id="siteLabel">正在读取站点…</strong>
       <small id="siteAddress"></small>
     </div>
     <div class="actions">
-      <button class="switch" id="switchSite" type="button">切换站点</button>
-      <button id="manageSites" type="button">管理站点</button>
+      <span id="connection" role="status"></span>
+      <button class="switch" id="switchSite" type="button" data-i18n>切换站点</button>
+      <button id="manageSites" type="button" data-i18n>设置</button>
     </div>
   </header>
-  <p class="status" id="status">正在加载工作台…</p>
+  <main class="status" id="status" aria-live="polite">
+    <h1 id="statusTitle"></h1><p id="statusDetail"></p>
+    <div id="recovery" hidden><button id="retry" class="switch" data-i18n>重试</button><button id="recoverySwitch" data-i18n>切换站点</button></div>
+  </main>
+  <script src="locale.cjs"></script>
   <script>
     const label = document.getElementById("siteLabel");
     const address = document.getElementById("siteAddress");
     const notice = document.getElementById("status");
     function render(status) {
+      const language = status.language || "zh";
+      const t = (text) => window.desktopT(language, text);
+      document.querySelector(".site-bar").setAttribute("aria-label", t("当前登录站点"));
+      document.documentElement.lang = language === "en" ? "en" : "zh-CN";
+      document.querySelectorAll("[data-i18n]").forEach((node) => {
+        node.dataset.key ||= node.textContent;
+        node.textContent = t(node.dataset.key);
+      });
       label.textContent = status.label;
       address.textContent = status.address;
       address.title = status.address;
+      const names = { connecting: "正在连接", online: "已连接", offline: "网络离线", error: "连接失败" };
+      const indicator = document.getElementById("connection");
+      indicator.textContent = t(names[status.connection] || "正在连接");
+      indicator.dataset.state = status.connection;
+      document.getElementById("statusTitle").textContent = t(status.loadFailed ? "无法连接工作台" : "正在加载工作台…");
+      document.getElementById("statusDetail").textContent = status.loadFailed ? t("请检查网络或站点地址，然后重试。") : status.address;
+      document.getElementById("recovery").hidden = !status.loadFailed;
     }
     function fail(error) { notice.textContent = `无法读取桌面站点：${error.message || error}`; }
     document.getElementById("switchSite").addEventListener("click", () => window.desktopShell.openSites("picker").catch(fail));
-    document.getElementById("manageSites").addEventListener("click", () => window.desktopShell.openSites("manage").catch(fail));
+    document.getElementById("manageSites").addEventListener("click", () => window.desktopShell.openSites("settings").catch(fail));
+    document.getElementById("retry").addEventListener("click", () => window.desktopShell.retry().catch(fail));
+    document.getElementById("recoverySwitch").addEventListener("click", () => window.desktopShell.openSites("picker").catch(fail));
     window.desktopShell.onStatus(render);
     window.desktopShell.getStatus().then(render).catch(fail);
   </script>

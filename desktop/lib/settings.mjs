@@ -128,8 +128,9 @@ function migrateLegacyUrl(url) {
 
 export function defaultSettings() {
   return {
-    version: 2,
+    version: 3,
     mode: "cloud",
+    language: "zh",
     serverUrl: DEFAULT_CLOUD_URL,
     sites: defaultSites(),
   };
@@ -155,8 +156,9 @@ export function loadSettings(root) {
           : settings.serverUrl;
 
       settings = {
-        version: 2,
+        version: 3,
         mode: normalizeMode(parsed.mode),
+        language: parsed.language === "en" ? "en" : "zh",
         serverUrl,
         sites,
       };
@@ -182,8 +184,9 @@ export function saveSettings(root, settings) {
   const file = settingsPath(root);
   const temporaryFile = `${file}.${process.pid}.tmp`;
   const normalized = {
-    version: 2,
+    version: 3,
     mode: normalizeMode(settings.mode),
+    language: settings.language === "en" ? "en" : "zh",
     serverUrl: normalizeServerUrl(settings.serverUrl || DEFAULT_CLOUD_URL),
     sites: settings.sites ? validateSites(settings.sites) : defaultSites(),
   };

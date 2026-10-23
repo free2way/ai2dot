@@ -9,6 +9,8 @@ import {
   shell,
   WebContentsView,
 } from "electron";
+import locale from "./lib/locale.cjs";
+import { sitePartition, migrateSiteCookies, readDraft, writeDraft, clearDrafts } from "./lib/workspace-storage.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,6 +80,50 @@ let serverLogStream = null;
 let quitting = false;
 let booting = false;
 let cleanupStarted = false;
+let switching = false;
+let localOrigin = "";
+let connection = "connecting";
+let loadFailed = false;
+let retryTimer;
+let retryCount = 0;
+let serverVersion = "";
+const sessionsUsed = new Set();
+const flushRequests = new Map();
+const t = (text) => locale.desktopT(settings?.language, text);
+
+function setConnection(next, failed = loadFailed) {
+  connection = next;
+  loadFailed = failed;
+  mainView?.setVisible(!failed && next !== "connecting");
+  updateWindowTitle();
+}
+
+function resizeActiveView() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainView) return;
+  const [width, height] = mainWindow.getContentSize();
+  mainView.setBounds({ x: 0, y: SITE_BAR_HEIGHT, width, height: Math.max(0, height - SITE_BAR_HEIGHT) });
+}
+
+async function flushWorkspace() {
+  if (!mainView || mainView.webContents.isDestroyed()) return;
+  const sender = mainView.webContents;
+  const id = Math.random().toString(36).slice(2);
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => { flushRequests.delete(id); resolve(); }, 1200);
+    flushRequests.set(id, { sender, finish: () => { clearTimeout(timer); flushRequests.delete(id); resolve(); } });
+    sender.send("workspace:flush", id);
+  });
+}
+
+function broadcastLanguage(language) {
+  if (language !== "zh" && language !== "en") throw new Error("Invalid language");
+  settings = saveSettings(paths.root, { ...settings, language });
+  mainView?.webContents.send("workspace:language-changed", language);
+  sitePickerWindow?.webContents.send("desktop:language-changed", language);
+  Menu.setApplicationMenu(buildMenu());
+  updateWindowTitle();
+}
+
 
 async function shutdownCleanup() {
   const child = serverChild;
@@ -89,9 +135,11 @@ async function shutdownCleanup() {
   serverLogStream = null;
 
   try {
-    const ses = session.fromPartition(partitionForMode());
-    await ses.cookies.flushStore();
-    ses.flushStorageData();
+    for (const partition of sessionsUsed) {
+      const ses = session.fromPartition(partition);
+      await ses.cookies.flushStore();
+      ses.flushStorageData();
+    }
   } catch (error) {
     logLine(`storage flush failed: ${error}`);
   }
@@ -162,8 +210,8 @@ function siteHost(url) {
 }
 
 function currentSiteLabel() {
-  if (!settings) return "未选择";
-  if (runtimeMode === "local") return "本地模式";
+  if (!settings) return t("未选择");
+  if (runtimeMode === "local") return t("本地模式");
   const serverUrl = activeServerUrl || settings.serverUrl;
   const site = settings.sites?.find(
     (item) => item.url === serverUrl,
@@ -190,7 +238,11 @@ function desktopStatus() {
   return {
     ...currentSiteSelection(),
     label: currentSiteLabel(),
-    address: runtimeMode === "local" ? "本机数据库 · 离线模式" : activeServerUrl,
+    address: runtimeMode === "local" ? t("本机数据库 · 离线模式") : activeServerUrl,
+    language: settings?.language ?? "zh", connection, loadFailed, switching,
+    version: app.getVersion(), serverVersion,
+    openAtLogin: app.isPackaged && process.platform === "darwin" ? app.getLoginItemSettings().openAtLogin : false,
+    canOpenAtLogin: app.isPackaged && process.platform === "darwin",
   };
 }
 
@@ -213,33 +265,102 @@ function persistSiteSelection(mode, serverUrl) {
   return settings;
 }
 
-function relaunchForSiteChange() {
-  if (DEV_MODE) {
-    dialog.showMessageBoxSync({
-      type: "info",
-      title: "开发模式",
-      message: "站点已保存，请退出并重新运行 npm run desktop:dev。",
-      buttons: ["继续"],
-    });
-    return false;
-  }
-
-  app.relaunch();
-  app.quit();
-  return true;
+function applySiteFromMenu(mode, serverUrl) {
+  void switchSite(mode, serverUrl).catch((error) => {
+    dialog.showErrorBox(t("无法切换站点"), error instanceof Error ? error.message : String(error));
+  });
 }
 
-function applySiteFromMenu(mode, serverUrl) {
+async function ensureLocalRuntime() {
+  if (localOrigin) return localOrigin;
+  config = loadOrCreateConfig(paths.root);
+  if (DEV_URL) { localOrigin = new URL(DEV_URL).origin; return localOrigin; }
+  const port = await findFreePort();
+  const started = startServer({
+    appRoot: appRootPath(), env: buildServerEnv({ config, paths, port, version: app.getVersion() }),
+    logFile: paths.serverLog, label: "next-standalone",
+  });
+  serverChild = started.child;
+  serverLogStream = started.stream;
+  const origin = `http://127.0.0.1:${port}`;
+  const child = serverChild;
+  child.on("exit", (code, signal) => {
+    logLine(`server exited code=${code} signal=${signal}`);
+    if (serverChild !== child) return;
+    serverChild = null;
+    started.stream.end();
+    serverLogStream = null;
+    localOrigin = "";
+    if (!quitting && runtimeMode === "local") setConnection("error", true);
+  });
   try {
-    persistSiteSelection(mode, serverUrl);
+    await waitForServer(origin, { child, timeoutMs: 120000 });
+    localOrigin = origin;
+    return origin;
   } catch (error) {
-    dialog.showErrorBox(
-      "无法切换站点",
-      error instanceof Error ? error.message : String(error),
-    );
+    serverChild = null;
+    await stopServer(child);
+    serverLogStream?.end();
+    serverLogStream = null;
+    throw error;
+  }
+}
+
+async function switchSite(mode, serverUrl) {
+  if (switching) throw new Error(t("正在切换…"));
+  switching = true;
+  updateWindowTitle();
+  try {
+    const nextMode = mode === "local" ? "local" : "cloud";
+    const url = nextMode === "cloud" ? normalizeServerUrl(serverUrl || settings.serverUrl) : await ensureLocalRuntime();
+    await flushWorkspace();
+    persistSiteSelection(nextMode, nextMode === "cloud" ? url : settings.serverUrl);
+    runtimeMode = nextMode;
+    activeServerUrl = nextMode === "cloud" ? url : "";
+    appOrigin = new URL(url).origin;
+    serverVersion = "";
+    const signedIn = nextMode === "local" || await hasCloudSession();
+    startUrl = `${url}${signedIn ? "/workspace" : "/sign-in"}`;
+    clearTimeout(retryTimer);
+    retryCount = 0;
+    if (!mainWindow) await createMainWindow();
+    else await createActiveView();
+    Menu.setApplicationMenu(buildMenu());
+  } finally { switching = false; updateWindowTitle(); }
+}
+
+async function retryConnection() {
+  clearTimeout(retryTimer);
+  if (switching) return;
+  retryCount = 0;
+  if (runtimeMode === "local" && !localOrigin) {
+    await switchSite("local");
     return;
   }
-  relaunchForSiteChange();
+  if (mainView) {
+    const currentUrl = mainView.webContents.getURL();
+    setConnection("connecting", false);
+    await mainView.webContents.loadURL(isAppUrl(currentUrl) && currentUrl !== "about:blank" ? currentUrl : startUrl).catch(() => {});
+  }
+}
+
+async function probeConnection() {
+  const view = mainView;
+  const origin = appOrigin;
+  if (!view || switching || connection === "connecting") return;
+  try {
+    const response = await fetch(`${runtimeMode === "cloud" ? activeServerUrl : appOrigin}/api/health`, {
+      signal: AbortSignal.timeout(5000), redirect: "error",
+    });
+    if (view !== mainView || origin !== appOrigin) return;
+    if (!response.ok) throw new Error(`Health HTTP ${response.status}`);
+    const body = await response.json();
+    serverVersion = typeof body.version === "string" ? body.version.slice(0, 100) : "";
+    if (loadFailed) await retryConnection();
+    else setConnection("online", false);
+  } catch {
+    if (view === mainView && origin === appOrigin && connection !== "connecting") setConnection("offline");
+  }
 }
 
 function appRootPath() {
@@ -312,7 +433,7 @@ function closeSplash() {
 }
 
 function partitionForMode() {
-  return runtimeMode === "cloud" ? CLOUD_PARTITION : LOCAL_PARTITION;
+  return runtimeMode === "cloud" ? sitePartition(activeServerUrl || settings.serverUrl) : LOCAL_PARTITION;
 }
 
 async function setLocalSessionCookie() {
@@ -334,7 +455,8 @@ async function setLocalSessionCookie() {
 }
 
 async function hasCloudSession() {
-  const ses = session.fromPartition(CLOUD_PARTITION);
+  const ses = session.fromPartition(partitionForMode());
+  await migrateSiteCookies(paths.root, activeServerUrl, session.fromPartition(CLOUD_PARTITION), ses);
   const cookies = await ses.cookies.get({ url: activeServerUrl });
   return cookies.some(
     (cookie) =>
@@ -372,12 +494,12 @@ function hardenSession(ses, injectCsp) {
       void dialog
         .showMessageBox({
           type: "question",
-          buttons: ["允许", "拒绝"],
+          buttons: [t("允许"), t("拒绝")],
           defaultId: 1,
           cancelId: 1,
           noLink: true,
-          title: "麦克风/摄像头权限",
-          message: "ai2dot 请求使用麦克风或摄像头，是否允许？",
+          title: t("麦克风/摄像头权限"),
+          message: t("ai2dot 请求使用麦克风或摄像头，是否允许？"),
         })
         .then(({ response }) => callback(response === 0))
         .catch(() => callback(false));
@@ -418,11 +540,6 @@ function hardenWebContents(webContents) {
 }
 
 async function createMainWindow() {
-  const partition = partitionForMode();
-  const ses = session.fromPartition(partition);
-  hardenSession(ses, runtimeMode === "local");
-  await setLocalSessionCookie();
-
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -445,28 +562,7 @@ async function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.webContents.on("will-redirect", (event) => event.preventDefault());
-  const view = new WebContentsView({
-    webPreferences: {
-      partition,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webviewTag: false,
-      spellcheck: true,
-    },
-  });
-  mainView = view;
-  mainWindow.contentView.addChildView(view);
-  const resizeView = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    const [width, height] = mainWindow.getContentSize();
-    view.setBounds({ x: 0, y: SITE_BAR_HEIGHT, width, height: Math.max(0, height - SITE_BAR_HEIGHT) });
-  };
-  resizeView();
-  mainWindow.on("resize", resizeView);
-  hardenWebContents(view.webContents);
-  updateWindowTitle();
-
+  mainWindow.on("resize", resizeActiveView);
   mainWindow.on("page-title-updated", (event) => {
     event.preventDefault();
     updateWindowTitle();
@@ -480,60 +576,65 @@ async function createMainWindow() {
   });
 
   mainWindow.on("closed", () => {
-    if (!view.webContents.isDestroyed()) view.webContents.close();
-    if (mainView === view) mainView = null;
+    clearTimeout(retryTimer);
+    if (mainView && !mainView.webContents.isDestroyed()) mainView.webContents.close();
+    mainView = null;
     mainWindow = null;
   });
+  await mainWindow.loadFile(desktopLibPath("shell.html"));
+  await createActiveView();
+}
 
-  view.webContents.on(
-    "render-process-gone",
-    (_event, details) => {
-      logLine(`renderer gone: ${JSON.stringify(details)}`);
-      if (!quitting) {
-        dialog.showErrorBox(
-          "ai2dot 页面异常",
-          `渲染进程已退出（${details.reason}）。请重新打开应用。`,
-        );
-      }
-    },
-  );
-
-  view.webContents.on(
-    "did-fail-load",
-    (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
-      if (!isMainFrame || errorCode === -3) return;
-      logLine(`load failed: ${errorCode} ${errorDescription} url=${_validatedUrl}`);
-      void dialog
-        .showMessageBox({
-          type: "error",
-          title: "无法打开工作台",
-          message: "连接失败，请检查网络或云端地址。",
-          detail: `${errorDescription} (${errorCode})\n\n地址：${startUrl}`,
-          buttons: ["重试", "切换登录站点", "退出"],
-          defaultId: 0,
-          cancelId: 2,
-          noLink: true,
-        })
-        .then(({ response }) => {
-          if (response === 0) {
-            void mainView?.webContents.loadURL(startUrl);
-          } else if (response === 1) {
-            openSitePicker();
-          } else {
-            app.quit();
-          }
-        });
-    },
-  );
-
-  try {
-    await mainWindow.loadFile(desktopLibPath("shell.html"));
-    await view.webContents.loadURL(startUrl);
-    view.webContents.focus();
-  } catch (error) {
-    // did-fail-load already presents retry/settings actions.
-    logLine(`initial load failed: ${error}`);
+async function createActiveView() {
+  const partition = partitionForMode();
+  sessionsUsed.add(partition);
+  hardenSession(session.fromPartition(partition), runtimeMode === "local");
+  await setLocalSessionCookie();
+  if (mainView) {
+    mainWindow.contentView.removeChildView(mainView);
+    if (!mainView.webContents.isDestroyed()) mainView.webContents.close();
   }
+  const view = new WebContentsView({ webPreferences: {
+    partition, preload: desktopLibPath("workspace-preload.cjs"),
+    contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false, spellcheck: true,
+  } });
+  mainView = view;
+  mainWindow.contentView.addChildView(view);
+  resizeActiveView();
+  hardenWebContents(view.webContents);
+  setConnection("connecting", false);
+  const active = () => mainView === view && !quitting;
+  view.webContents.on("did-start-navigation", (_event, _url, inPlace, isMainFrame) => {
+    if (active() && isMainFrame && !inPlace && (isAppUrl(_url) || isAllowedAuthNavigation(_url))) setConnection("connecting", false);
+  });
+  view.webContents.on("did-finish-load", () => {
+    if (!active() || loadFailed) return;
+    clearTimeout(retryTimer);
+    retryCount = 0;
+    setConnection("online", false);
+    view.webContents.send("workspace:language-changed", settings.language);
+  });
+  view.webContents.on("render-process-gone", (_event, details) => {
+    if (!active()) return;
+    logLine(`renderer gone: ${details.reason}`);
+    setConnection("error", true);
+  });
+  view.webContents.on("did-fail-load", (_event, code, description, _url, isMainFrame) => {
+    if (!active() || !isMainFrame || code === -3) return;
+    logLine(`load failed: ${code} ${description}`);
+    setConnection("error", true);
+    clearTimeout(retryTimer);
+    const delay = [2000, 5000, 15000][retryCount++];
+    // Certificate and policy failures require explicit user action.
+    if (delay && ![-200, -201, -202, -206, -501].includes(code)) {
+      retryTimer = setTimeout(() => {
+        if (!active()) return;
+        setConnection("connecting", false);
+        void view.webContents.loadURL(startUrl).catch(() => {});
+      }, delay);
+    }
+  });
+  void view.webContents.loadURL(startUrl).then(() => { if (active()) view.webContents.focus(); }).catch((error) => logLine(`load failed: ${error}`));
 }
 
 async function maybeCaptureWindow() {
@@ -573,7 +674,7 @@ function openSitePicker({ firstRun = false, initialView = "picker" } = {}) {
     minimizable: false,
     maximizable: false,
     show: false,
-    title: "选择登录站点",
+    title: t("选择登录站点"),
     backgroundColor: "#07090c",
     parent: mainWindow ?? undefined,
     modal: Boolean(mainWindow),
@@ -586,6 +687,9 @@ function openSitePicker({ firstRun = false, initialView = "picker" } = {}) {
     },
   });
 
+  sitePickerWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  sitePickerWindow.webContents.on("will-navigate", (event) => event.preventDefault());
+  sitePickerWindow.webContents.on("will-redirect", (event) => event.preventDefault());
   sitePickerWindow.once("ready-to-show", () => sitePickerWindow?.show());
   sitePickerWindow.on("closed", () => {
     const wasFirstRun = firstRunPicker;
@@ -608,16 +712,50 @@ function registerSitePickerIpc() {
     }
   }
 
+  function assertPickerSender(event) {
+    if (!sitePickerWindow || event.sender !== sitePickerWindow.webContents || event.senderFrame !== sitePickerWindow.webContents.mainFrame) {
+      throw new Error("This action is only available from desktop settings.");
+    }
+  }
+  function assertWorkspaceSender(event) {
+    if (!mainView || event.sender !== mainView.webContents || event.senderFrame !== mainView.webContents.mainFrame || !isAppUrl(event.senderFrame.url) || event.senderFrame.url === "about:blank") {
+      throw new Error("Invalid workspace sender");
+    }
+  }
+  const draftSite = () => runtimeMode === "local" ? "local" : activeServerUrl;
+  ipcMain.handle("workspace:language", (event) => { assertWorkspaceSender(event); return settings.language; });
+  ipcMain.handle("workspace:language-set", (event, language) => { assertWorkspaceSender(event); broadcastLanguage(language); });
+  ipcMain.handle("workspace:draft-get", (event, key) => { assertWorkspaceSender(event); return readDraft(paths.root, draftSite(), key); });
+  ipcMain.handle("workspace:draft-set", (event, key, value) => { assertWorkspaceSender(event); writeDraft(paths.root, draftSite(), key, value); });
+  ipcMain.on("workspace:flushed", (event, id) => {
+    const request = flushRequests.get(id);
+    if (request && event.sender === request.sender && event.senderFrame === request.sender.mainFrame) request.finish();
+  });
+  ipcMain.on("workspace:network", (event, online) => {
+    try { assertWorkspaceSender(event); } catch { return; }
+    if (online) void probeConnection();
+    else setConnection("offline");
+  });
+  ipcMain.handle("desktop:retry", (event) => { assertShellSender(event); return retryConnection(); });
+  ipcMain.handle("settings:get", (event) => { assertPickerSender(event); return desktopStatus(); });
+  ipcMain.handle("settings:save", (event, payload) => {
+    assertPickerSender(event);
+    if (payload.language !== undefined) broadcastLanguage(payload.language);
+    if (typeof payload.openAtLogin === "boolean" && app.isPackaged && process.platform === "darwin") app.setLoginItemSettings({ openAtLogin: payload.openAtLogin });
+    return desktopStatus();
+  });
+  ipcMain.handle("settings:open-folder", (event) => { assertPickerSender(event); showDataFolder(); });
   ipcMain.handle("desktop:status", (event) => {
     assertShellSender(event);
     return desktopStatus();
   });
   ipcMain.handle("desktop:open-sites", (event, view) => {
     assertShellSender(event);
-    openSitePicker({ initialView: view === "manage" ? "manage" : "picker" });
+    openSitePicker({ initialView: ["manage", "settings"].includes(view) ? view : "picker" });
   });
 
-  ipcMain.handle("sites:list", () => {
+  ipcMain.handle("sites:list", (event) => {
+    assertPickerSender(event);
     const current = settings ?? loadSettings(paths.root);
     settings = current;
     return {
@@ -626,7 +764,8 @@ function registerSitePickerIpc() {
     };
   });
 
-  ipcMain.handle("sites:save", async (_event, payload) => {
+  ipcMain.handle("sites:save", async (event, payload) => {
+    assertPickerSender(event);
     try {
       if (!settings) settings = loadSettings(paths.root);
       const sites = validateSites(payload);
@@ -655,7 +794,8 @@ function registerSitePickerIpc() {
     }
   });
 
-  ipcMain.handle("sites:reset", () => {
+  ipcMain.handle("sites:reset", (event) => {
+    assertPickerSender(event);
     if (!settings) settings = loadSettings(paths.root);
     const sites = defaultSites();
     settings = saveSettings(paths.root, {
@@ -673,27 +813,19 @@ function registerSitePickerIpc() {
     };
   });
 
-  ipcMain.handle("site:choose", async (_event, payload) => {
+  ipcMain.handle("site:choose", async (event, payload) => {
+    assertPickerSender(event);
     try {
-      const mode = payload?.mode === "local" ? "local" : "cloud";
-      persistSiteSelection(mode, payload?.serverUrl);
-
-      if (!relaunchForSiteChange()) {
-        sitePickerWindow?.close();
-        return { ok: true, requiresRestart: true };
-      }
-
+      await switchSite(payload?.mode, payload?.serverUrl);
+      firstRunPicker = false;
+      sitePickerWindow?.close();
       return { ok: true };
     } catch (error) {
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
-
-  ipcMain.on("site:cancel", () => {
-    sitePickerWindow?.close();
+  ipcMain.on("site:cancel", (event) => {
+    try { assertPickerSender(event); sitePickerWindow?.close(); } catch { /* Ignore untrusted senders. */ }
   });
 }
 
@@ -701,7 +833,7 @@ function showCredentials() {
   if (!config) return;
   const result = dialog.showMessageBoxSync({
     type: "info",
-    title: "本地登录与密码",
+    title: t("本地登录与密码"),
     message: `邮箱：${config.email}`,
     detail:
       "本地模式启动时会自动注入会话，无需手动登录。\n\n" +
@@ -715,8 +847,8 @@ function showCredentials() {
 
   const confirmed = dialog.showMessageBoxSync({
     type: "warning",
-    title: "重置本地密码",
-    message: "确定要重置本地登录密码吗？",
+    title: t("重置本地密码"),
+    message: t("确定要重置本地登录密码吗？"),
     detail: "当前会话会失效，应用需要重启后才会使用新密码。",
     buttons: ["重置并重启", "取消"],
     defaultId: 1,
@@ -729,8 +861,8 @@ function showCredentials() {
   clipboard.writeText(password);
   dialog.showMessageBoxSync({
     type: "info",
-    title: "新密码已生成",
-    message: "新密码已复制到剪贴板",
+    title: t("新密码已生成"),
+    message: t("新密码已复制到剪贴板"),
     detail: `${password}\n\n${DEV_MODE ? "请退出并重新运行 npm run desktop:dev。" : "应用将自动重启。"}`,
     buttons: ["继续"],
     noLink: true,
@@ -752,8 +884,8 @@ function showServerLog() {
   }
   dialog.showMessageBoxSync({
     type: "info",
-    title: "服务日志",
-    message: "暂无日志",
+    title: t("服务日志"),
+    message: t("暂无日志"),
     detail: paths.serverLog,
   });
 }
@@ -775,7 +907,13 @@ function showSettingsFile() {
 
 async function signOutCloud() {
   if (!settings) return;
-  const ses = session.fromPartition(CLOUD_PARTITION);
+  if (switching || runtimeMode !== "cloud") return;
+  const view = mainView;
+  const url = activeServerUrl;
+  await flushWorkspace();
+  if (view !== mainView || url !== activeServerUrl) return;
+  const ses = session.fromPartition(sitePartition(url));
+  clearDrafts(paths.root, url);
   await ses.clearStorageData({
     storages: [
       "cookies",
@@ -792,22 +930,22 @@ async function signOutCloud() {
     // Not every Electron build exposes the auth cache.
   }
   logLine("cloud session cleared");
-  if (mainView) {
-    await mainView.webContents.loadURL(`${activeServerUrl}/sign-in`);
+  if (mainView === view) {
+    await view.webContents.loadURL(`${url}/sign-in`);
   }
 }
 
 function siteMenuItems() {
   const items = [
-    { label: `当前站点：${currentSiteLabel()}`, enabled: false },
+    { label: `${t("当前站点")}：${currentSiteLabel()}`, enabled: false },
     { type: "separator" },
     {
-      label: "切换登录站点…",
+      label: t("切换登录站点…"),
       accelerator: "CmdOrCtrl+Shift+S",
       click: () => openSitePicker(),
     },
     {
-      label: "管理站点…",
+      label: t("管理站点…"),
       click: () => openSitePicker({ initialView: "manage" }),
     },
     { type: "separator" },
@@ -823,7 +961,7 @@ function siteMenuItems() {
   }
 
   items.push({
-    label: "本地模式（离线）",
+    label: t("本地模式（离线）"),
     type: "radio",
     checked: runtimeMode === "local",
     click: () => applySiteFromMenu("local", settings?.serverUrl),
@@ -837,22 +975,22 @@ function buildMenu() {
   const cloud = runtimeMode === "cloud";
   const accountItems = cloud
     ? [
-        { label: "退出登录", click: () => void signOutCloud() },
+        { label: t("退出登录"), click: () => void signOutCloud() },
         {
-          label: "重新加载",
+          label: t("重新加载"),
           click: () => mainView?.webContents.reload(),
         },
       ]
     : [
-        { label: "本地登录与密码…", click: showCredentials },
+        { label: t("本地登录与密码…"), click: showCredentials },
         {
-          label: "重新加载",
+          label: t("重新加载"),
           click: () => mainView?.webContents.reload(),
         },
       ];
 
   const siteItem = {
-    label: "切换登录站点…",
+    label: t("切换登录站点…"),
     click: () => openSitePicker(),
   };
 
@@ -862,91 +1000,92 @@ function buildMenu() {
           {
             label: "ai2dot",
             submenu: [
-              { role: "about" },
+              { role: "about", label: t("关于") },
               { type: "separator" },
               ...accountItems,
               siteItem,
+              { label: t("设置…"), accelerator: "CmdOrCtrl+,", click: () => openSitePicker({ initialView: "settings" }) },
               { type: "separator" },
               {
-                label: "打开设置文件（云端地址）",
+                label: t("打开设置文件（云端地址）"),
                 click: showSettingsFile,
               },
               {
-                label: "打开数据目录",
+                label: t("打开数据目录"),
                 click: showDataFolder,
               },
               {
-                label: "查看服务日志",
+                label: t("查看服务日志"),
                 click: showServerLog,
               },
               { type: "separator" },
-              { role: "services" },
+              { role: "services", label: t("服务") },
               { type: "separator" },
-              { role: "hide" },
-              { role: "hideOthers" },
-              { role: "unhide" },
+              { role: "hide", label: t("隐藏 ai2dot") },
+              { role: "hideOthers", label: t("隐藏其他") },
+              { role: "unhide", label: t("显示全部") },
               { type: "separator" },
-              { role: "quit" },
+              { role: "quit", label: t("退出") },
             ],
           },
         ]
       : []),
     {
-      label: "编辑",
+      label: t("编辑"),
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
+        { role: "undo", label: t("撤销") },
+        { role: "redo", label: t("重做") },
         { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "pasteAndMatchStyle" },
-        { role: "selectAll" },
+        { role: "cut", label: t("剪切") },
+        { role: "copy", label: t("复制") },
+        { role: "paste", label: t("粘贴") },
+        { role: "pasteAndMatchStyle", label: t("粘贴并匹配样式") },
+        { role: "selectAll", label: t("全选") },
       ],
     },
     {
-      label: "账号",
+      label: t("账号"),
       submenu: accountItems,
     },
     {
-      label: "站点",
+      label: t("站点"),
       submenu: siteMenuItems(),
     },
     {
-      label: "查看",
+      label: t("查看"),
       submenu: [
-        { label: "重新加载", accelerator: "CmdOrCtrl+R", click: () => mainView?.webContents.reload() },
-        { label: "强制重新加载", accelerator: "CmdOrCtrl+Shift+R", click: () => mainView?.webContents.reloadIgnoringCache() },
-        ...(DEV_MODE ? [{ label: "开发者工具", accelerator: "Alt+CmdOrCtrl+I", click: () => mainView?.webContents.toggleDevTools() }] : []),
+        { label: t("重新加载"), accelerator: "CmdOrCtrl+R", click: () => mainView?.webContents.reload() },
+        { label: t("强制重新加载"), accelerator: "CmdOrCtrl+Shift+R", click: () => mainView?.webContents.reloadIgnoringCache() },
+        ...(DEV_MODE ? [{ label: t("开发者工具"), accelerator: "Alt+CmdOrCtrl+I", click: () => mainView?.webContents.toggleDevTools() }] : []),
         { type: "separator" },
-        { label: "实际大小", accelerator: "CmdOrCtrl+0", click: () => mainView?.webContents.setZoomLevel(0) },
-        { label: "放大", accelerator: "CmdOrCtrl+Plus", click: () => { if (mainView) mainView.webContents.setZoomLevel(mainView.webContents.getZoomLevel() + 0.5); } },
-        { label: "缩小", accelerator: "CmdOrCtrl+-", click: () => { if (mainView) mainView.webContents.setZoomLevel(mainView.webContents.getZoomLevel() - 0.5); } },
+        { label: t("实际大小"), accelerator: "CmdOrCtrl+0", click: () => mainView?.webContents.setZoomLevel(0) },
+        { label: t("放大"), accelerator: "CmdOrCtrl+Plus", click: () => { if (mainView) mainView.webContents.setZoomLevel(mainView.webContents.getZoomLevel() + 0.5); } },
+        { label: t("缩小"), accelerator: "CmdOrCtrl+-", click: () => { if (mainView) mainView.webContents.setZoomLevel(mainView.webContents.getZoomLevel() - 0.5); } },
         { type: "separator" },
-        { role: "togglefullscreen" },
+        { role: "togglefullscreen", label: t("进入全屏") },
       ],
     },
     {
-      label: "窗口",
+      label: t("窗口"),
       submenu: [
-        { role: "minimize" },
-        { role: "zoom" },
+        { role: "minimize", label: t("最小化") },
+        { role: "zoom", label: t("缩放") },
         ...(isMac
-          ? [{ type: "separator" }, { role: "front" }]
-          : [{ role: "close" }]),
+          ? [{ type: "separator" }, { role: "front", label: t("全部置前") }]
+          : [{ role: "close", label: t("关闭窗口") }]),
       ],
     },
     ...(isMac
       ? []
       : [
           {
-            label: "帮助",
+            label: t("帮助"),
             submenu: [
               ...accountItems,
               siteItem,
-              { label: "打开设置文件", click: showSettingsFile },
-              { label: "打开数据目录", click: showDataFolder },
-              { label: "查看服务日志", click: showServerLog },
+              { label: t("打开设置文件"), click: showSettingsFile },
+              { label: t("打开数据目录"), click: showDataFolder },
+              { label: t("查看服务日志"), click: showServerLog },
             ],
           },
         ]),
@@ -969,59 +1108,8 @@ async function boot() {
       return;
     }
 
-    if (DEV_URL) {
-      runtimeMode = "local";
-      config = loadOrCreateConfig(paths.root);
-      appOrigin = new URL(DEV_URL).origin;
-      startUrl = `${DEV_URL.replace(/\/+$/, "")}/workspace`;
-      logLine(`using development server ${startUrl}`);
-      createSplash("正在启动本地工作台");
-    } else if (settings.mode === "cloud") {
-      runtimeMode = "cloud";
-      activeServerUrl = settings.serverUrl;
-      appOrigin = new URL(activeServerUrl).origin;
-      const signedIn = await hasCloudSession();
-      startUrl = `${activeServerUrl}${signedIn ? "/workspace" : "/sign-in"}`;
-      logLine(`using cloud server ${startUrl}`);
-      createSplash("正在连接云端工作台");
-    } else {
-      runtimeMode = "local";
-      config = loadOrCreateConfig(paths.root);
-      createSplash("正在启动本地工作台");
-
-      const port = await findFreePort();
-      const env = buildServerEnv({ config, paths, port });
-      const appRoot = appRootPath();
-      const started = startServer({
-        appRoot,
-        env,
-        logFile: paths.serverLog,
-        label: "next-standalone",
-      });
-      serverChild = started.child;
-      serverLogStream = started.stream;
-      appOrigin = `http://127.0.0.1:${port}`;
-      startUrl = `${appOrigin}/workspace`;
-
-      serverChild.on("exit", (code, signal) => {
-        logLine(`server exited code=${code} signal=${signal}`);
-        if (!quitting) {
-          closeSplash();
-          dialog.showErrorBox(
-            "ai2dot 本地服务已停止",
-            `本地服务意外退出（code ${code ?? "null"}）。\n\n日志：${paths.serverLog}`,
-          );
-          app.quit();
-        }
-      });
-
-      logLine(`starting local server on ${appOrigin}`);
-      await waitForServer(appOrigin, { child: serverChild, timeoutMs: 120_000 });
-      logLine("local server is ready");
-    }
-
-    Menu.setApplicationMenu(buildMenu());
-    await createMainWindow();
+    createSplash(t(settings.mode === "local" || DEV_URL ? "正在启动本地工作台" : "正在连接云端工作台"));
+    await switchSite(DEV_URL ? "local" : settings.mode, settings.serverUrl);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logLine(`boot failed: ${message}`);
@@ -1061,6 +1149,7 @@ if (!hasSingleInstanceLock) {
       );
     }, 6 * 60 * 60 * 1_000);
 
+    setInterval(() => { void probeConnection(); }, 30000);
     void boot();
   });
 

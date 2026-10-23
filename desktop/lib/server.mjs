@@ -25,7 +25,7 @@ export async function findFreePort() {
   });
 }
 
-export function buildServerEnv({ config, paths, port }) {
+export function buildServerEnv({ config, paths, port, version = "" }) {
   return {
     // Minimal allowlist: never inherit shell secrets or deployment variables.
     PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -39,6 +39,7 @@ export function buildServerEnv({ config, paths, port }) {
     PORT: String(port),
     HOSTNAME: "127.0.0.1",
 
+    AI2DOT_APP_VERSION: version,
     AI2DOT_DESKTOP: "1",
     AI2DOT_DESKTOP_DATA_DIR: paths.dataDir,
     AI2DOT_AUTH_MODE: "local",

@@ -1,5 +1,6 @@
 "use client";
 
+import { desktopBridge } from "@/lib/desktop-bridge";
 import { useChat } from "@ai-sdk/react";
 import { Show, UserButton } from "@clerk/nextjs";
 import {
@@ -521,32 +522,46 @@ export function ChatWorkspace({
   const returnTo = activeConversationId && activeBranchId
     ? `/chat/${activeConversationId}?branch=${activeBranchId}` : "/workspace";
 
+  const editedDraftKey = useRef<string>(undefined);
+  const [restoredDraftKey, setRestoredDraftKey] = useState<string>();
   const saveComposerDraft = () => {
-    if (!draftKey) return;
-    try {
-      window.sessionStorage.setItem(draftKey, JSON.stringify({
-        input, selection: skillSelection, scope: skillScope,
-        overrideDirty: skillOverrideDirty, savedAt: Date.now(),
-      }));
-    } catch { /* Draft storage is optional when browser storage is unavailable. */ }
+    if (!draftKey || restoredDraftKey !== draftKey) return;
+    const value = JSON.stringify({
+      input, selection: skillSelection, scope: skillScope,
+      overrideDirty: skillOverrideDirty, savedAt: Date.now(),
+    });
+    try { window.localStorage.setItem(draftKey, value); } catch {}
+    void desktopBridge()?.setDraft(draftKey, value).catch(() => {});
   };
 
   useEffect(() => {
     if (!draftKey) return;
-    const timer = window.setTimeout(() => {
-      try {
-      const draft = parseChatDraft(window.sessionStorage.getItem(draftKey));
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      let raw: string | null = null;
+      try { raw = await desktopBridge()?.getDraft(draftKey) ?? null; } catch {}
+      try { raw ??= window.sessionStorage.getItem(draftKey) ?? window.localStorage.getItem(draftKey); } catch {}
+      if (!active) return;
+      const draft = parseChatDraft(raw);
+      if (editedDraftKey.current !== draftKey) setInput(draft?.input ?? "");
       if (draft) {
-        setInput(draft.input);
         setSkillSelection(draft.selection);
         setSkillScope(draft.scope);
         setSkillOverrideDirty(draft.overrideDirty);
       }
-      window.sessionStorage.removeItem(draftKey);
-      } catch { /* Browsers may disable session storage. */ }
+      try { window.sessionStorage.removeItem(draftKey); } catch {}
+      setRestoredDraftKey(draftKey);
     }, 0);
-    return () => window.clearTimeout(timer);
+    return () => { active = false; window.clearTimeout(timer); };
   }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftKey || restoredDraftKey !== draftKey) return;
+    const value = JSON.stringify({ input, selection: skillSelection, scope: skillScope,
+      overrideDirty: skillOverrideDirty, savedAt: Date.now() });
+    try { window.localStorage.setItem(draftKey, value); } catch {}
+    void desktopBridge()?.setDraft(draftKey, value).catch(() => {});
+  }, [draftKey, restoredDraftKey, input, skillSelection, skillScope, skillOverrideDirty]);
   const assistantName = initialAssistant?.name ?? "Dot";
   const turnCount = messages.filter((message) => message.role === "user").length;
   const turnNumbers = useMemo(() => {
@@ -989,7 +1004,13 @@ export function ChatWorkspace({
         submitError instanceof Error ? submitError.message : "消息发送失败。",
       );
     }
-    if (sent) setInput("");
+    if (sent) {
+      if (draftKey) {
+        try { window.localStorage.removeItem(draftKey); } catch {}
+        void desktopBridge()?.setDraft(draftKey, null).catch(() => {});
+      }
+      setInput("");
+    }
   };
 
   const handleSubmit = (event: FormEvent) => {
@@ -1570,7 +1591,7 @@ export function ChatWorkspace({
                 })}
               </div>
             )}
-            <textarea ref={composerTextareaRef} value={input} onChange={(event) => { if (isListening) speechRecognitionRef.current?.stop(); setInput(event.target.value); if (/(^|\s)\/skill\s*$/.test(event.target.value)) setSkillPickerOpen(true); }} onKeyDown={handleComposerKeyDown} placeholder={`${t("继续提问，或让{{name}}完善上面的结果…", { name: assistantName })}`} rows={1} aria-label={t("消息")} />
+            <textarea ref={composerTextareaRef} value={input} onChange={(event) => { if (isListening) speechRecognitionRef.current?.stop(); editedDraftKey.current = draftKey; setInput(event.target.value); if (/(^|\s)\/skill\s*$/.test(event.target.value)) setSkillPickerOpen(true); }} onKeyDown={handleComposerKeyDown} placeholder={`${t("继续提问，或让{{name}}完善上面的结果…", { name: assistantName })}`} rows={1} aria-label={t("消息")} />
             {(isListening || speechError) && (
               <div className={`composer-voice-status${isListening ? " is-listening" : ""}`} role="status">
                 {isListening && <span aria-hidden="true" />}

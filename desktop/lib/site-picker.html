@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline';" />
 <title>选择登录站点</title>
 <style>
   :root { color-scheme: dark; }
@@ -79,50 +79,119 @@
   button.action:hover { background: rgba(255,255,255,.06); }
   button.primary { background: #b7f34a; border-color: #b7f34a; color: #141b07; }
   button.primary:hover { background: #c6f764; }
+  nav { display: flex; gap: 10px; margin-bottom: 20px; }
+  nav button { padding: 8px 14px; color: #bbc7b6; border: 1px solid #33432a; background: transparent; border-radius: 8px; cursor: pointer; }
+  nav button[aria-selected="true"] { color: #b7f34a; border-color: #b7f34a; }
+  .setting { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; border-bottom: 1px solid #273022; font-size: 14px; }
+  select { color: #e7ece3; background: #151c12; border: 1px solid #33432a; border-radius: 8px; padding: 8px 16px; }
+  .setting small { color: #8b9588; }
   .status { min-height: 18px; margin-top: 8px; color: #f0a26b; font-size: 12px; }
 </style>
 </head>
 <body>
+  <nav aria-label="Settings">
+    <button id="generalTab" data-i18n>通用</button><button id="sitesTab" data-i18n>站点</button><button id="aboutTab" data-i18n>关于</button>
+  </nav>
+  <section class="view hidden" id="settingsView">
+    <h1 data-i18n>设置</h1>
+    <p class="sub" data-i18n>语言会同步到工作台、菜单及所有站点。</p>
+    <label class="setting"><span data-i18n>语言</span><select id="language"><option value="zh">简体中文</option><option value="en">English</option></select></label>
+    <label class="setting"><span data-i18n>登录时启动 ai2dot</span><input id="openAtLogin" type="checkbox"></label>
+    <p class="hint" id="loginHint" data-i18n>仅在安装后的 macOS 应用中可用。</p>
+    <div class="status" id="settingsStatus"></div>
+    <div class="foot"><span></span><button class="action" id="closeSettings" data-i18n>关闭</button></div>
+  </section>
+  <section class="view hidden" id="aboutView">
+    <h1>ai2dot</h1>
+    <div class="setting"><span data-i18n>客户端版本</span><strong id="appVersion"></strong></div>
+    <div class="setting"><span data-i18n>当前连接</span><small id="currentConnection"></small></div>
+    <div class="setting"><span data-i18n>服务端版本</span><small id="serverVersion"></small></div>
+    <div class="foot"><button class="action" id="openFolder" data-i18n>打开数据目录</button><button class="action" id="closeAbout" data-i18n>关闭</button></div>
+  </section>
   <section class="view" id="pickerView">
-    <h1>选择登录站点</h1>
-    <p class="sub">桌面端会加载所选站点的登录页，登录账号与业务数据都归属该站点。选择“本地模式”则使用本机数据库，离线可用，账号也独立保存在本机。</p>
+    <h1 data-i18n>选择登录站点</h1>
+    <p class="sub" data-i18n>登录账号与业务数据归属所选站点；本地模式使用本机独立数据库。</p>
     <div class="options" id="siteOptions"></div>
     <div class="status" id="pickerStatus"></div>
     <div class="foot">
-      <span class="hint">选择后会重启应用。之后可用窗口顶部「切换站点」或菜单「站点」再次修改。</span>
+      <span class="hint" data-i18n>切换无需重启；输入中的文字会自动保存。</span>
       <div class="actions">
-        <button class="action" id="manage">管理站点</button>
-        <button class="action" id="cancel">取消</button>
+        <button class="action" id="manage" data-i18n>管理站点</button>
+        <button class="action" id="cancel" data-i18n>取消</button>
       </div>
     </div>
   </section>
 
   <section class="view hidden" id="manageView">
-    <h1>管理登录站点</h1>
-    <p class="sub">添加或修改要连接的 Web 站点。地址必须使用 HTTPS；本机调试可以使用 http://127.0.0.1。最多 10 个站点。</p>
-    <div class="edit-head"><span>名称</span><span>站点地址</span><span></span></div>
+    <h1 data-i18n>管理登录站点</h1>
+    <p class="sub" data-i18n>地址需使用 HTTPS，本机调试可使用 HTTP；最多 10 个站点。</p>
+    <div class="edit-head"><span data-i18n>名称</span><span data-i18n>站点地址</span><span></span></div>
     <div class="editor" id="siteEditor"></div>
-    <button class="add" id="addSite">+ 添加站点</button>
+    <button class="add" id="addSite" data-i18n>+ 添加站点</button>
     <div class="status" id="manageStatus"></div>
     <div class="foot">
-      <span class="hint">保存后返回站点列表；正在使用的站点被修改时，重启后生效。</span>
+      <span class="hint" data-i18n>保存后选择站点即可切换。</span>
       <div class="actions">
-        <button class="action" id="resetSites">恢复默认</button>
-        <button class="action" id="back">返回</button>
-        <button class="action primary" id="saveSites">保存</button>
+        <button class="action" id="resetSites" data-i18n>恢复默认</button>
+        <button class="action" id="back" data-i18n>返回</button>
+        <button class="action primary" id="saveSites" data-i18n>保存</button>
       </div>
     </div>
   </section>
 
+  <script src="locale.cjs"></script>
   <script>
-    const pickerView = document.getElementById("pickerView");
-    const manageView = document.getElementById("manageView");
     const optionsEl = document.getElementById("siteOptions");
     const editorEl = document.getElementById("siteEditor");
     const pickerStatus = document.getElementById("pickerStatus");
     const manageStatus = document.getElementById("manageStatus");
     const state = { sites: [], current: { mode: "cloud", serverUrl: "" }, editor: [] };
     let busy = false;
+    let language = "zh";
+    let currentView = "picker";
+    const t = (text) => window.desktopT(language, text);
+    function localize() {
+      document.documentElement.lang = language === "en" ? "en" : "zh-CN";
+      document.querySelectorAll("[data-i18n]").forEach((node) => {
+        node.dataset.key ||= node.textContent;
+        node.textContent = t(node.dataset.key);
+      });
+      document.getElementById("language").value = language;
+      renderPicker();
+      setChoicesEnabled(!busy);
+      if (currentView === "manage") renderEditor();
+    }
+    function showView(view) {
+      currentView = view;
+      for (const name of ["picker", "manage", "settings", "about"]) document.getElementById(`${name}View`).classList.toggle("hidden", name !== view);
+      document.getElementById("generalTab").setAttribute("aria-selected", view === "settings");
+      document.getElementById("sitesTab").setAttribute("aria-selected", view === "picker" || view === "manage");
+      document.getElementById("aboutTab").setAttribute("aria-selected", view === "about");
+    }
+    function renderSettings(data) {
+      language = data.language;
+      document.getElementById("openAtLogin").checked = data.openAtLogin;
+      document.getElementById("openAtLogin").disabled = !data.canOpenAtLogin;
+      document.getElementById("loginHint").hidden = data.canOpenAtLogin;
+      document.getElementById("appVersion").textContent = data.version;
+      document.getElementById("currentConnection").textContent = data.address;
+      document.getElementById("serverVersion").textContent = data.serverVersion || t("未知");
+      localize();
+    }
+    document.getElementById("generalTab").onclick = () => showView("settings");
+    document.getElementById("sitesTab").onclick = () => showPicker();
+    document.getElementById("aboutTab").onclick = () => { showView("about"); window.sitePicker.getSettings().then(renderSettings).catch(showError); };
+    function showError(error) { document.getElementById("settingsStatus").textContent = error.message || String(error); }
+    document.getElementById("language").onchange = async (event) => {
+      try { renderSettings(await window.sitePicker.saveSettings({ language: event.target.value })); } catch (error) { showError(error); }
+    };
+    document.getElementById("openAtLogin").onchange = async (event) => {
+      try { renderSettings(await window.sitePicker.saveSettings({ openAtLogin: event.target.checked })); } catch (error) { event.target.checked = !event.target.checked; showError(error); }
+    };
+    for (const id of ["closeSettings", "closeAbout"]) document.getElementById(id).onclick = () => window.sitePicker.cancel();
+    document.getElementById("openFolder").onclick = () => window.sitePicker.openFolder().catch(showError);
+    window.sitePicker.onLanguage((next) => { language = next; localize(); });
+    window.sitePicker.getSettings().then(renderSettings).catch(showError);
 
     function el(tag, className, text) {
       const node = document.createElement(tag);
@@ -136,7 +205,7 @@
     }
 
     function setStatus(node, message) {
-      node.textContent = message || "";
+      node.textContent = t(message) || "";
     }
 
     function isCurrent(site) {
@@ -164,20 +233,20 @@
       optionsEl.textContent = "";
       for (const site of state.sites) {
         optionsEl.append(card({
-          badge: "云端",
+          badge: t("云端"),
           title: site.name,
           host: hostOf(site.url),
-          desc: "使用该站点的账号、会话与知识库。",
+          desc: t("使用该站点的账号、会话与知识库。"),
           current: isCurrent(site),
           id: site.id,
           onClick: () => chooseSite(site),
         }));
       }
       optionsEl.append(card({
-        badge: "离线",
-        title: "本地模式",
-        host: "PGlite · 本机",
-        desc: "完全使用本机资源与数据库，不依赖网络；账号为本机独立账号。",
+        badge: t("离线"),
+        title: t("本地模式"),
+        host: t("本机"),
+        desc: t("使用本机独立账号和数据库。模型服务仍可能需要联网。"),
         current: state.current.mode === "local",
         mutedBadge: true,
         onClick: chooseLocal,
@@ -187,7 +256,7 @@
     async function chooseSite(site) {
       if (busy) return;
       busy = true;
-      setStatus(pickerStatus, "正在保存并重启…");
+      setStatus(pickerStatus, "正在切换…");
       setChoicesEnabled(false);
       try {
         const result = await window.sitePicker.choose({ mode: "cloud", serverUrl: site.url });
@@ -206,7 +275,7 @@
     async function chooseLocal() {
       if (busy) return;
       busy = true;
-      setStatus(pickerStatus, "正在保存并重启…");
+      setStatus(pickerStatus, "正在切换…");
       setChoicesEnabled(false);
       try {
         const result = await window.sitePicker.choose({ mode: "local" });
@@ -223,16 +292,14 @@
     }
 
     function showPicker() {
-      manageView.classList.add("hidden");
-      pickerView.classList.remove("hidden");
+      showView("picker");
       setStatus(manageStatus, "");
       renderPicker();
     }
 
     function showManage() {
       state.editor = state.sites.map((site) => ({ ...site }));
-      pickerView.classList.add("hidden");
-      manageView.classList.remove("hidden");
+      showView("manage");
       setStatus(manageStatus, "");
       renderEditor();
     }
@@ -244,7 +311,7 @@
         const name = el("input");
         name.value = site.name;
         name.maxLength = 40;
-        name.placeholder = "站点名称";
+        name.placeholder = t("站点名称");
         name.addEventListener("input", () => { state.editor[index].name = name.value; });
 
         const url = el("input", "url");
@@ -252,7 +319,7 @@
         url.placeholder = "https://example.com";
         url.addEventListener("input", () => { state.editor[index].url = url.value; });
 
-        const remove = el("button", "remove", "删除");
+        const remove = el("button", "remove", t("删除"));
         remove.disabled = state.editor.length === 1;
         remove.addEventListener("click", () => {
           state.editor.splice(index, 1);
@@ -275,7 +342,7 @@
       }
       state.editor.push({
         id: `custom-${crypto.randomUUID()}`,
-        name: "新站点",
+        name: t("新站点"),
         url: "https://",
       });
       renderEditor();
@@ -294,7 +361,7 @@
       state.current = result.current;
       state.editor = state.sites.map((site) => ({ ...site }));
       renderEditor();
-      setStatus(manageStatus, "已恢复默认站点，选择站点后重启切换；当前连接保持不变。");
+      setStatus(manageStatus, "已恢复默认站点。");
     });
 
     document.getElementById("saveSites").addEventListener("click", async () => {
@@ -318,12 +385,13 @@
       }
       state.sites = result.sites;
       state.current = result.current;
-      setStatus(pickerStatus, "站点已保存。选择站点后应用将重启并切换；当前连接保持不变。");
+      setStatus(pickerStatus, "站点已保存。");
       showPicker();
     });
 
     window.sitePicker.onView?.((view) => {
       if (view === "manage") showManage();
+      else if (view === "settings") showView("settings");
       else showPicker();
     });
 
@@ -332,7 +400,8 @@
       state.sites = data.sites;
       state.current = data.current;
       if (initialView === "manage") showManage();
-      else renderPicker();
+      else if (initialView === "settings") showView("settings");
+      else showPicker();
     }).catch((error) => {
       setStatus(pickerStatus, String(error?.message || error));
     });
