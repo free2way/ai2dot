@@ -349,7 +349,8 @@ async function probeConnection() {
   const origin = appOrigin;
   if (!view || switching || connection === "connecting") return;
   try {
-    const response = await fetch(`${runtimeMode === "cloud" ? activeServerUrl : appOrigin}/api/health`, {
+    // Use the same proxy, cookies and network stack as the visible workspace.
+    const response = await session.fromPartition(partitionForMode()).fetch(`${runtimeMode === "cloud" ? activeServerUrl : appOrigin}/api/health`, {
       signal: AbortSignal.timeout(5000), redirect: "error",
     });
     if (view !== mainView || origin !== appOrigin) return;

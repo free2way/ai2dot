@@ -17,6 +17,7 @@ vi.mock("electron", async () => {
     relaunch: vi.fn(), quit: vi.fn(), exit: vi.fn(),
   });
   const ses = {
+    fetch: vi.fn(async () => ({ ok: true, json: async () => ({ version: "deployed-version" }) })),
     cookies: { get: vi.fn(async () => []), set: vi.fn() },
     setPermissionRequestHandler: vi.fn(), setPermissionCheckHandler: vi.fn(),
     clearStorageData: vi.fn(), clearCache: vi.fn(), clearAuthCache: vi.fn(),
@@ -266,4 +267,14 @@ describe("desktop recovery and preference isolation", () => {
     expect(reviewState.sessions.get(first.options.webPreferences.partition).clearStorageData).not.toHaveBeenCalled();
     expect(reviewState.sessions.get(second.options.webPreferences.partition).clearStorageData).toHaveBeenCalledOnce();
   });
+});
+
+it("checks connectivity through the current Chromium session and retains its server version", async () => {
+  const window = await boot();
+  const view = reviewState.views[0];
+  view.webContents.emit("did-finish-load");
+  await vi.advanceTimersByTimeAsync(30000);
+  const currentSession = reviewState.sessions.get(view.options.webPreferences.partition);
+  expect(currentSession.fetch).toHaveBeenCalledWith("https://dot.ai2note.com/api/health", expect.objectContaining({ redirect: "error" }));
+  expect(window.webContents.send).toHaveBeenLastCalledWith("desktop:status-changed", expect.objectContaining({ connection: "online", serverVersion: "deployed-version" }));
 });

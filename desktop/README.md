@@ -43,8 +43,8 @@ npm run desktop:build
 
 产物位于 `desktop/release/`：
 
-- `ai2dot-0.2.0-arm64.dmg`（当前机器架构）
-- `ai2dot-0.2.0-arm64.zip`
+- `ai2dot-0.2.1-arm64.dmg`（当前机器架构）
+- `ai2dot-0.2.1-arm64.zip`
 
 打包流程会过滤所有 `.env`、`.env.*` 文件，并检查最终运行时，避免将构建机的环境密钥放入安装包。
 
