@@ -3,6 +3,7 @@ import "server-only";
 import { and, desc, eq, isNull, like, sql } from "drizzle-orm";
 import { listClerkUserProfiles } from "@/server/auth/clerk-profile";
 import { getDb } from "@/server/db";
+import { getQueryRows } from "@/server/db/rows";
 import {
   platformAdminAuditLogs,
   platformAdmins,
@@ -152,7 +153,7 @@ export async function getPlatformConsoleData() {
           (select count(*) from skills) as skill_count,
           (select count(*) from assistants) as assistant_count,
           pg_database_size(current_database()) as database_bytes
-      `).then((rows) => Array.from(rows) as unknown as OverviewRow[]),
+      `).then(getQueryRows<OverviewRow>),
       db.execute(sql<DailyUsageRow>`
         with days as (
           select generate_series(
@@ -171,7 +172,7 @@ export async function getPlatformConsoleData() {
          and usage_events.created_at < days.day + interval '1 day'
         group by days.day
         order by days.day
-      `).then((rows) => Array.from(rows) as unknown as DailyUsageRow[]),
+      `).then(getQueryRows<DailyUsageRow>),
       db.execute(sql<UserRow>`
         with member_stats as (
           select user_id, count(distinct workspace_id) as workspace_count
@@ -214,7 +215,7 @@ export async function getPlatformConsoleData() {
         left join user_storage on user_storage.user_id = u.id
         order by u.last_seen_at desc nulls last, u.created_at desc
         limit 100
-      `).then((rows) => Array.from(rows) as unknown as UserRow[]),
+      `).then(getQueryRows<UserRow>),
       db.execute(sql<WorkspaceRow>`
         with members as (
           select workspace_id, count(*) as member_count
@@ -266,7 +267,7 @@ export async function getPlatformConsoleData() {
         left join assistant_counts on assistant_counts.workspace_id = w.id
         order by w.updated_at desc
         limit 100
-      `).then((rows) => Array.from(rows) as unknown as WorkspaceRow[]),
+      `).then(getQueryRows<WorkspaceRow>),
       db
         .select({
           id: platformAdminAuditLogs.id,

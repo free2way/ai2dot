@@ -91,6 +91,10 @@ const zh: Dictionary = {
   "已就绪": "已就绪",
   "可检索": "可检索",
   "解析中": "解析中",
+  "关键词检索": "关键词检索",
+  "语义索引中": "语义索引中",
+  "混合检索": "混合检索",
+  "语义索引服务未配置，仍可使用关键词检索。": "语义索引服务未配置，仍可使用关键词检索。",
   "失败": "失败",
   "检索": "检索",
   "检索结果": "检索结果",
@@ -340,6 +344,10 @@ const en: Dictionary = {
   "已就绪": "Ready",
   "可检索": "Ready",
   "解析中": "Parsing",
+  "关键词检索": "Keyword search",
+  "语义索引中": "Indexing semantics",
+  "混合检索": "Hybrid search",
+  "语义索引服务未配置，仍可使用关键词检索。": "Semantic indexing is not configured. Keyword search is still available.",
   "失败": "Failed",
   "检索": "Search",
   "检索结果": "Search results",
@@ -543,10 +551,16 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = bridge?.onLanguage(apply);
     const timer = window.setTimeout(() => {
       if (changed || preferenceRevision.current !== revision) return;
+      let saved: string | null = null;
       try {
-        const saved = window.localStorage.getItem(LANGUAGE_KEY) ?? window.localStorage.getItem("ai2dot_lang");
-        if (saved === "zh" || saved === "en") setLanguageState(saved);
-      } catch {}
+        const current = window.localStorage.getItem(LANGUAGE_KEY);
+        saved = current === "zh" || current === "en"
+          ? current
+          : window.localStorage.getItem("ai2dot_lang");
+      } catch { /* Keep the language switch usable when storage is blocked. */ }
+      setLanguageState(saved === "zh" || saved === "en"
+        ? saved
+        : navigator.language.toLowerCase().startsWith("en") ? "en" : "zh");
     }, 0);
     void bridge?.getLanguage().then((next) => { if (preferenceRevision.current === revision) apply(next); }).catch(() => {});
     return () => { active = false; window.clearTimeout(timer); unsubscribe?.(); };
@@ -559,7 +573,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const setLanguage = (next: Language) => {
     preferenceRevision.current += 1;
     setLanguageState(next);
-    try { window.localStorage.setItem(LANGUAGE_KEY, next); } catch {}
+    try {
+      window.localStorage.setItem(LANGUAGE_KEY, next);
+    } catch { /* Language changes still apply for this page. */ }
     void desktopBridge()?.setLanguage(next).catch(() => {});
   };
 

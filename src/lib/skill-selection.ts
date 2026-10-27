@@ -99,7 +99,7 @@ export type SkillResolution = {
 export const DEFAULT_SKILL_SELECTION: SkillSelection = {
   mode: "auto",
   refs: [],
-  contextTarget: "recent_messages",
+  contextTarget: "conversation",
 };
 
 export function estimateSkillTokens(value: string) {

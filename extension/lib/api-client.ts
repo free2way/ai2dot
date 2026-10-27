@@ -68,6 +68,7 @@ export async function summarizePage({
     headers: {
       ...authorization(token),
       "content-type": "application/json",
+      accept: "application/x-ndjson",
     },
     body: JSON.stringify({
       idempotencyKey: crypto.randomUUID(),
@@ -90,21 +91,60 @@ export async function summarizePage({
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  const framed = response.headers.get("content-type")?.includes("application/x-ndjson");
   let output = "";
+  let pending = "";
+  let completed = false;
   let lastUpdateAt = 0;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    output += decoder.decode(value, { stream: true });
-    const now = performance.now();
-    if (now - lastUpdateAt >= 50) {
-      lastUpdateAt = now;
-      onDelta(output);
+  const consume = (text: string) => {
+    if (!framed) {
+      output += text;
+      return;
     }
+    pending += text;
+    let index: number;
+    while ((index = pending.indexOf("\n")) >= 0) {
+      const line = pending.slice(0, index).trim();
+      pending = pending.slice(index + 1);
+      if (!line) continue;
+      let event: unknown;
+      try { event = JSON.parse(line); }
+      catch { throw new ApiError("总结响应格式不正确。", "INVALID_RESPONSE", 502); }
+      if (!event || typeof event !== "object" || !("type" in event) || completed) {
+        throw new ApiError("总结响应格式不正确。", "INVALID_RESPONSE", 502);
+      }
+      if (event.type === "error") {
+        throw new ApiError("模型总结失败，请稍后重试。", "SUMMARY_FAILED", 502);
+      } else if (event.type === "done") {
+        completed = true;
+      } else if (event.type === "delta" && "text" in event && typeof event.text === "string") {
+        output += event.text;
+      } else {
+        throw new ApiError("总结响应格式不正确。", "INVALID_RESPONSE", 502);
+      }
+    }
+  };
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      consume(decoder.decode(value, { stream: true }));
+      const now = performance.now();
+      if (now - lastUpdateAt >= 50) {
+        lastUpdateAt = now;
+        onDelta(output);
+      }
+    }
+    consume(decoder.decode());
+    if ((framed && (!completed || pending.trim())) || !output.trim()) {
+      throw new ApiError("总结未完成，请重新分析。", "INCOMPLETE_RESPONSE", 502);
+    }
+    onDelta(output);
+    return output;
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-  output += decoder.decode();
-  onDelta(output);
-  return output;
 }
 
 export async function uploadMarkdown({

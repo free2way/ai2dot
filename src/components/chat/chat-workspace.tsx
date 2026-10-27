@@ -114,6 +114,21 @@ const KNOWLEDGE_SELECTION_KEY = "ai2dot.knowledge.selection.v1";
 const RECENT_SKILLS_KEY = "ai2dot.skills.recent.v1";
 const CHAT_TRANSPORT = new DefaultChatTransport({ api: "/api/chat" });
 
+function getChatErrorDetails(error: unknown) {
+  const message = error instanceof Error ? error.message : "消息发送失败。";
+  try {
+    const payload: unknown = JSON.parse(message);
+    if (payload && typeof payload === "object" && "message" in payload && typeof payload.message === "string") {
+      return {
+        message: payload.message,
+        code: "code" in payload && typeof payload.code === "string" ? payload.code : undefined,
+        status: "status" in payload && typeof payload.status === "string" ? payload.status : undefined,
+      };
+    }
+  } catch { /* Stream and network errors can be plain text. */ }
+  return { message, code: undefined, status: undefined };
+}
+
 type BrowserSpeechRecognitionResult = {
   isFinal: boolean;
   0?: { transcript: string };
@@ -953,20 +968,35 @@ export function ChatWorkspace({
         ? retryRef.current
         : { intent, key: createClientUuid(), messageId: createClientUuid() };
       retryRef.current = retry;
-      sendErrorRef.current = null;
-      await sendMessage(
-        {
-          id: retry.messageId,
-          role: "user",
-          parts: [{ type: "text", text: originalValue }],
-          ...(messages.some((message) => message.id === retry.messageId)
-            ? { messageId: retry.messageId } : {}),
-        },
-        {
-          body: { ...body, idempotencyKey: retry.key },
-        },
-      );
-      if (sendErrorRef.current) throw sendErrorRef.current;
+      const sendDraft = async (attempt: typeof retry) => {
+        sendErrorRef.current = null;
+        await sendMessage(
+          {
+            id: attempt.messageId,
+            role: "user",
+            parts: [{ type: "text", text: originalValue }],
+            ...(messages.some((message) => message.id === attempt.messageId)
+              ? { messageId: attempt.messageId } : {}),
+          },
+          { body: { ...body, idempotencyKey: attempt.key } },
+        );
+        if (sendErrorRef.current) throw sendErrorRef.current;
+      };
+      try {
+        await sendDraft(retry);
+      } catch (sendError) {
+        const details = getChatErrorDetails(sendError);
+        if (!conversationId || !branchId || details.code !== "GENERATION_TERMINAL" ||
+            (details.status !== "failed" && details.status !== "stopped")) {
+          throw sendError;
+        }
+        // Unknown network outcomes retain their key. Only a server-confirmed
+        // failed/stopped execution is safe to replace with a new generation.
+        const nextAttempt = { ...retry, key: createClientUuid() };
+        retryRef.current = nextAttempt;
+        clearError();
+        await sendDraft(nextAttempt);
+      }
       retryRef.current = null;
       sent = true;
       if (requestSkillSelection.refs.length > 0) {
@@ -1000,9 +1030,7 @@ export function ChatWorkspace({
         });
       }
     } catch (submitError) {
-      setCloudError(
-        submitError instanceof Error ? submitError.message : "消息发送失败。",
-      );
+      setCloudError(getChatErrorDetails(submitError).message);
     }
     if (sent) {
       if (draftKey) {
@@ -1086,6 +1114,8 @@ export function ChatWorkspace({
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Safari can end composition before the confirming Enter keydown arrives.
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (
       skillPickerOpen &&
       ["Enter", "ArrowDown", "ArrowUp", "Escape"].includes(event.key)
@@ -1560,7 +1590,7 @@ export function ChatWorkspace({
                 ))}
               </div>
             )}
-            {error && <div className="chat-error" role="alert"><CircleHelp size={17} /><span>{error.message || "请求失败，请稍后重试。"}</span><button onClick={clearError}>关闭</button></div>}
+            {error && <div className="chat-error" role="alert"><CircleHelp size={17} /><span>{getChatErrorDetails(error).message || "请求失败，请稍后重试。"}</span><button onClick={clearError}>关闭</button></div>}
             {cloudError && <div className="chat-error" role="alert"><CircleHelp size={17} /><span>{cloudError}</span><button onClick={() => setCloudError(undefined)}>关闭</button></div>}
             </div>
           </div>

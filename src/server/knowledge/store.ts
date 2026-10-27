@@ -26,7 +26,7 @@ import {
 } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
 import { enqueueKnowledgeEmbeddingJob } from "@/server/knowledge/embedding-jobs";
-import { embedKnowledgeQuery } from "@/server/knowledge/embeddings";
+import { embedKnowledgeQuery, isKnowledgeEmbeddingConfigured } from "@/server/knowledge/embeddings";
 
 export const MAX_KNOWLEDGE_DOCUMENT_CHARACTERS = 500_000;
 const CHUNK_SIZE = 1_200;
@@ -226,8 +226,13 @@ export async function listKnowledgeDocuments(
     .groupBy(knowledgeDocuments.id)
     .orderBy(desc(knowledgeDocuments.updatedAt));
 
+  const embeddingConfigured = isKnowledgeEmbeddingConfigured();
   return rows.map((row) => ({
     ...row,
+    ...(!embeddingConfigured && row.status === "ready" ? {
+      embeddingStatus: "disabled" as const,
+      embeddingError: "语义索引服务未配置，仍可使用关键词检索。",
+    } : {}),
     updatedAt: row.updatedAt.toISOString(),
   }));
 }

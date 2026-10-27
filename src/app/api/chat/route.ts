@@ -48,7 +48,7 @@ import {
   updateConversationBranchSummary,
 } from "@/server/chat/store";
 import { summarizeConversationContext } from "@/server/chat/summarize";
-import { getDb } from "@/server/db";
+import { getDb, isDatabaseConfigured } from "@/server/db";
 import { usageEvents } from "@/server/db/schema";
 import {
   getWorkspaceContext,
@@ -322,19 +322,42 @@ export async function POST(request: Request) {
     );
   }
 
+  const gatewayConfigured = isAiGatewayConfigured();
+  const usesGateway = gatewayConfigured && isFeaturedModel(modelId);
   const needsWorkspace =
+    usesGateway ||
     Boolean(parsed.data.conversationId) ||
     modelId.startsWith("db:") ||
     parsed.data.knowledgeBaseIds.length > 0 ||
     parsed.data.mcpSourceIds.length > 0 ||
     parsed.data.skillSelection !== undefined ||
     parsed.data.continuation !== undefined;
-  const workspaceContext = needsWorkspace ? await getWorkspaceContext() : null;
-  const gatewayConfigured = isAiGatewayConfigured();
+  if (usesGateway && !isDatabaseConfigured()) {
+    return Response.json(
+      { code: "RATE_LIMIT_UNAVAILABLE", message: "启用网关前请配置数据库及账号访问控制。" },
+      { status: 503 },
+    );
+  }
+  let workspaceContext: WorkspaceContext | null = null;
+  try {
+    workspaceContext = needsWorkspace ? await getWorkspaceContext() : null;
+  } catch {
+    return Response.json(
+      { code: "WORKSPACE_UNAVAILABLE", message: "工作区暂时不可用，请稍后重试。" },
+      { status: 503 },
+    );
+  }
   const requestIdentity =
     gatewayConfigured && isAuthConfigured()
       ? await getRequestIdentity()
       : null;
+
+  if (usesGateway && !workspaceContext) {
+    return Response.json(
+      { code: "UNAUTHORIZED", message: "请使用有效账号登录后访问模型网关。" },
+      { status: 401 },
+    );
+  }
 
   if (parsed.data.conversationId && !workspaceContext) {
     return Response.json(
@@ -791,6 +814,7 @@ export async function POST(request: Request) {
     summary: branchContext?.contextSummary,
     summaryThroughClientMessageId:
       branchContext?.summaryThroughClientMessageId,
+    contextTarget: effectiveSkill.selection.contextTarget,
   });
   conversationSummary = contextPlan.previousSummary;
   messagesForModel = selectSkillTargetMessages(

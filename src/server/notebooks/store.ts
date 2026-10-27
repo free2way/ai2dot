@@ -1,6 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type {
   NotebookArtifactSummary,
@@ -21,6 +20,7 @@ import {
 } from "@/server/db/schema";
 import type { WorkspaceContext } from "@/server/db/workspace";
 import { addKnowledgeDocument, listKnowledgeDocuments } from "@/server/knowledge/store";
+import { buildNotebookSourceContext, MAX_NOTEBOOK_SOURCE_CHUNKS } from "@/server/notebooks/source-context";
 
 const notebookSelection = {
   id: notebooks.id,
@@ -514,27 +514,7 @@ export async function getNotebookGenerationContext(
       ),
     )
     .orderBy(asc(knowledgeDocuments.id), asc(knowledgeChunks.chunkIndex))
-    .limit(120);
+    .limit(MAX_NOTEBOOK_SOURCE_CHUNKS + 1);
 
-  const snapshotHash = createHash("sha256")
-    .update(
-      rows
-        .map((row) => `${row.documentId}:${row.documentUpdatedAt.toISOString()}`)
-        .join("|"),
-    )
-    .digest("hex");
-  let usedCharacters = 0;
-  const excerpts: string[] = [];
-  const sourceNumbers = new Map<string, number>();
-  for (const row of rows) {
-    if (usedCharacters >= 60_000) break;
-    const sourceNumber =
-      sourceNumbers.get(row.documentId) ?? sourceNumbers.size + 1;
-    sourceNumbers.set(row.documentId, sourceNumber);
-    const remaining = 60_000 - usedCharacters;
-    const excerpt = row.content.slice(0, remaining);
-    excerpts.push(`## 来源 ${sourceNumber}：${row.documentName}\n${excerpt}`);
-    usedCharacters += excerpt.length;
-  }
-  return { notebook, snapshotHash, sourceText: excerpts.join("\n\n") };
+  return { notebook, ...buildNotebookSourceContext(rows) };
 }

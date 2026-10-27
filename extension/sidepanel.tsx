@@ -19,10 +19,13 @@ import {
   markdownFileName,
 } from "~/lib/extraction";
 import {
+  clearAccountDrafts,
+  clearLegacyDraft,
   loadDraft,
   loadPreferences,
   saveDraft,
   savePreferences,
+  type ExtensionStorageScope,
 } from "~/lib/storage";
 import type {
   BootstrapResponse,
@@ -46,17 +49,20 @@ function friendlyError(error: unknown) {
   return error instanceof Error ? error.message : "操作失败，请稍后重试。";
 }
 
-function AuthenticatedPanel() {
+function AuthenticatedPanel({ userId }: { userId: string }) {
   const { getToken } = useAuth();
   const [bootstrap, setBootstrap] = useState<BootstrapResponse | null>(null);
+  const [storageScope, setStorageScope] = useState<ExtensionStorageScope | null>(null);
   const [preferences, setPreferences] = useState<SyncedPreferences>({
     summaryTemplate: "structured",
   });
   const [page, setPage] = useState<ExtractedPage | null>(null);
+  const [source, setSource] = useState<{ sourceUrl: string; sourceTitle: string } | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [state, setState] = useState<WorkState>("ready");
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
 
   const selectedModel = useMemo(
     () => bootstrap?.models.find((model) => model.id === preferences.defaultModelId),
@@ -65,43 +71,52 @@ function AuthenticatedPanel() {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([loadPreferences(), loadDraft()])
-      .then(async ([storedPreferences, draft]) => {
-        if (!active) return;
-        setPreferences(storedPreferences);
-        if (draft) setMarkdown(draft.markdown);
-        const token = await getToken();
-        if (!token) throw new Error("登录会话尚未就绪，请重新打开扩展。");
-        const loaded = await getBootstrap(token);
-        if (!active) return;
-        setBootstrap(loaded);
-        const next = {
-          ...storedPreferences,
-          defaultModelId:
-            storedPreferences.defaultModelId || loaded.models[0]?.id,
-          defaultKnowledgeBaseId:
-            storedPreferences.defaultKnowledgeBaseId ||
-            loaded.knowledgeBases[0]?.id,
-        };
-        setPreferences(next);
-        await savePreferences(next);
-      })
+    mountedRef.current = true;
+    void (async () => {
+      await clearLegacyDraft();
+      const token = await getToken();
+      if (!token) throw new Error("登录会话尚未就绪，请重新打开扩展。");
+      const loaded = await getBootstrap(token);
+      if (!active) return;
+      const scope = { userId, workspaceId: loaded.workspace.id };
+      const [storedPreferences, draft] = await Promise.all([
+        loadPreferences(scope), loadDraft(scope),
+      ]);
+      if (!active) return;
+      setStorageScope(scope);
+      setBootstrap(loaded);
+      setMarkdown(draft?.markdown ?? "");
+      setSource(draft ? { sourceUrl: draft.sourceUrl, sourceTitle: draft.sourceTitle } : null);
+      const next = {
+        ...storedPreferences,
+        defaultModelId:
+          loaded.models.some((model) => model.id === storedPreferences.defaultModelId)
+            ? storedPreferences.defaultModelId : loaded.models[0]?.id,
+        defaultKnowledgeBaseId:
+          loaded.knowledgeBases.some((base) => base.id === storedPreferences.defaultKnowledgeBaseId)
+            ? storedPreferences.defaultKnowledgeBaseId : loaded.knowledgeBases[0]?.id,
+      };
+      setPreferences(next);
+      await savePreferences(scope, next);
+    })()
       .catch((loadError) => {
         if (active) setError(friendlyError(loadError));
       });
     return () => {
       active = false;
+      mountedRef.current = false;
       abortRef.current?.abort();
     };
-  }, [getToken]);
+  }, [getToken, userId]);
 
   async function updatePreferences(next: SyncedPreferences) {
+    if (!storageScope) return;
     setPreferences(next);
-    await savePreferences(next);
+    await savePreferences(storageScope, next);
   }
 
   async function analyzeCurrentPage() {
-    if (!bootstrap || !preferences.defaultModelId) return;
+    if (!bootstrap || !storageScope || !preferences.defaultModelId) return;
     setError("");
     setState("extracting");
     try {
@@ -113,8 +128,11 @@ function AuthenticatedPanel() {
             : bootstrap.limits.maxPageCharacters,
         ),
       );
+      if (!mountedRef.current) return;
       setPage(extracted);
+      setSource({ sourceUrl: extracted.url, sourceTitle: extracted.title });
       const token = await getToken();
+      if (!mountedRef.current) return;
       if (!token) throw new Error("登录会话已失效，请重新登录。");
       const controller = new AbortController();
       abortRef.current = controller;
@@ -126,6 +144,7 @@ function AuthenticatedPanel() {
         template: preferences.summaryTemplate,
         signal: controller.signal,
         onDelta(value) {
+          if (!mountedRef.current) return;
           const document = composeMarkdownDocument(
             extracted,
             value,
@@ -134,13 +153,14 @@ function AuthenticatedPanel() {
           setMarkdown(document);
         },
       });
+      if (!mountedRef.current) return;
       const document = composeMarkdownDocument(
         extracted,
         summary,
         selectedModel?.name || preferences.defaultModelId,
       );
       setMarkdown(document);
-      await saveDraft({
+      await saveDraft(storageScope, {
         sourceUrl: extracted.url,
         sourceTitle: extracted.title,
         markdown: document,
@@ -148,6 +168,7 @@ function AuthenticatedPanel() {
       });
       setState("ready");
     } catch (analysisError) {
+      if (!mountedRef.current) return;
       if ((analysisError as Error).name !== "AbortError") {
         setError(friendlyError(analysisError));
       }
@@ -167,7 +188,7 @@ function AuthenticatedPanel() {
       const uploaded = await uploadMarkdown({
         token,
         knowledgeBaseId: preferences.defaultKnowledgeBaseId,
-        name: markdownFileName(page?.title || "网页摘要"),
+        name: markdownFileName(source?.sourceTitle || "网页摘要"),
         content: markdown,
       });
       await waitForKnowledgeDocument({
@@ -187,7 +208,7 @@ function AuthenticatedPanel() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = markdownFileName(page?.title || "网页摘要");
+    anchor.download = markdownFileName(source?.sourceTitle || "网页摘要");
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -298,10 +319,9 @@ function AuthenticatedPanel() {
           onChange={(event) => {
             setMarkdown(event.target.value);
             if (state === "uploaded") setState("ready");
-            if (page) {
-              void saveDraft({
-                sourceUrl: page.url,
-                sourceTitle: page.title,
+            if (source && storageScope) {
+              void saveDraft(storageScope, {
+                ...source,
                 markdown: event.target.value,
                 updatedAt: new Date().toISOString(),
               });
@@ -367,8 +387,20 @@ function AuthenticatedPanel() {
 }
 
 function AuthGate() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
+  const previousUserId = useRef<string | null>(null);
+  const activeUserId = isSignedIn ? userId ?? null : null;
   const sidePanelUrl = chrome.runtime.getURL("sidepanel.html");
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    const previous = previousUserId.current;
+    previousUserId.current = activeUserId;
+    if (previous && previous !== activeUserId) {
+      void clearAccountDrafts(previous).catch(() => undefined);
+    }
+    void clearLegacyDraft().catch(() => undefined);
+  }, [activeUserId, isLoaded]);
 
   if (!isLoaded) {
     return (
@@ -379,7 +411,7 @@ function AuthGate() {
     );
   }
 
-  if (isSignedIn) return <AuthenticatedPanel />;
+  if (isSignedIn && activeUserId) return <AuthenticatedPanel key={activeUserId} userId={activeUserId} />;
 
   return (
     <main className="sign-in-shell">

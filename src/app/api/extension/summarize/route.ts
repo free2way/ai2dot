@@ -19,6 +19,7 @@ import {
   PAGE_SUMMARY_SYSTEM_PROMPT,
 } from "@/server/extension/prompt";
 import { logServerEvent } from "@/server/observability/log";
+import { createSummaryResponse } from "@/server/extension/summary-stream";
 import { resolveChatModel } from "@/server/providers/store";
 import { consumeChatRateLimit } from "@/server/rate-limit/chat";
 
@@ -146,6 +147,7 @@ export async function POST(request: Request) {
     inputCharacters: parsed.data.page.markdown.length,
   });
 
+  let streamFailed = false;
   const result = streamText({
     model: languageModel,
     system: PAGE_SUMMARY_SYSTEM_PROMPT,
@@ -162,7 +164,8 @@ export async function POST(request: Request) {
           },
         }
       : {}),
-    async onEnd({ usage }) {
+    async onEnd({ usage, text, finishReason }) {
+      if (streamFailed || request.signal.aborted || !text.trim() || finishReason === "error") return;
       const latencyMs = Date.now() - startedAt;
       const inputTokens = usage.inputTokens ?? 0;
       const outputTokens = usage.outputTokens ?? 0;
@@ -200,6 +203,7 @@ export async function POST(request: Request) {
       });
     },
     onError({ error }) {
+      streamFailed = true;
       logServerEvent("error", "extension.summary_failed", {
         requestId,
         workspaceId: authorized.context.workspaceId,
@@ -209,6 +213,7 @@ export async function POST(request: Request) {
       });
     },
     onAbort() {
+      streamFailed = true;
       logServerEvent("info", "extension.summary_stopped", {
         requestId,
         workspaceId: authorized.context.workspaceId,
@@ -218,11 +223,13 @@ export async function POST(request: Request) {
     },
   });
 
-  return result.toTextStreamResponse({
-    headers: {
+  return createSummaryResponse(
+    result.stream,
+    request.headers.get("accept")?.includes("application/x-ndjson") ?? false,
+    {
       "cache-control": "no-store",
       "x-ai2dot-mode": "extension-summary",
       "x-ai2dot-request-id": requestId,
     },
-  });
+  );
 }

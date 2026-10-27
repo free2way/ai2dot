@@ -36,6 +36,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("Chat workspace recovery", () => {
+  it.each([{ isComposing: true }, { keyCode: 229 }])("does not submit an IME confirmation key %#", async (nativeEvent) => {
+    render(<ChatWorkspace {...props} />);
+    const input = screen.getByRole("textbox", { name: "消息" });
+    fireEvent.change(input, { target: { value: "正在输入中文" } });
+    fireEvent.keyDown(input, { key: "Enter", ...nativeEvent });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(input).toHaveValue("正在输入中文");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(mocks.send).toHaveBeenCalledOnce());
+  });
+
   it("keeps the selected conversation scope when editing context or mode", () => {
     render(<ChatWorkspace {...props} initialSkills={[{
       id: "00000000-0000-4000-8000-000000000003",
@@ -68,6 +79,41 @@ describe("Chat workspace recovery", () => {
     const second = mocks.send.mock.calls[1];
     expect(second[1].body.idempotencyKey).toBe(first[1].body.idempotencyKey);
     expect(second[0].id).toBe(first[0].id);
+  });
+
+  it.each(["failed", "stopped"])("uses a fresh key only after the server confirms a %s execution", async (status) => {
+    mocks.send.mockImplementationOnce(async () => { mocks.onError?.(new Error("network unavailable")); });
+    render(<ChatWorkspace {...props} />);
+    const input = screen.getByRole("textbox", { name: "消息" });
+    fireEvent.change(input, { target: { value: "recover this request" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("network unavailable");
+
+    mocks.send.mockImplementationOnce(async () => {
+      mocks.onError?.(new Error(JSON.stringify({ code: "GENERATION_TERMINAL", status, message: "Previous execution ended." })));
+    });
+    mocks.send.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await waitFor(() => expect(input).toHaveValue(""));
+
+    expect(mocks.send).toHaveBeenCalledTimes(3);
+    const [first, replay, fresh] = mocks.send.mock.calls;
+    expect(replay[1].body.idempotencyKey).toBe(first[1].body.idempotencyKey);
+    expect(fresh[1].body.idempotencyKey).not.toBe(first[1].body.idempotencyKey);
+    expect(fresh[0].id).toBe(first[0].id);
+  });
+
+  it("does not rerun an execution whose outcome is still in progress", async () => {
+    mocks.send.mockImplementation(async () => {
+      mocks.onError?.(new Error(JSON.stringify({ code: "GENERATION_IN_PROGRESS", message: "Still running." })));
+    });
+    render(<ChatWorkspace {...props} />);
+    const input = screen.getByRole("textbox", { name: "消息" });
+    fireEvent.change(input, { target: { value: "wait for original" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("Still running.");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("wait for original");
   });
 
   it("restores a scoped Library draft including a manual empty selection", async () => {

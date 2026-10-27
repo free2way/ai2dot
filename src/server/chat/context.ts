@@ -34,10 +34,12 @@ export function planConversationContext({
   messages,
   summary,
   summaryThroughClientMessageId,
+  contextTarget = "conversation",
 }: {
   messages: UIMessage[];
   summary?: string | null;
   summaryThroughClientMessageId?: string | null;
+  contextTarget?: SkillContextTarget;
 }): ConversationContextPlan {
   const cursorIndex = summaryThroughClientMessageId
     ? messages.findIndex(
@@ -52,8 +54,10 @@ export function planConversationContext({
     (total, message) => total + getMessageText(message).length,
     0,
   );
-  const exceedsMessageLimit =
-    unsummarizedMessages.length > CONTEXT_COMPACT_MESSAGE_THRESHOLD;
+  const messageThreshold = contextTarget === "recent_messages"
+    ? CONTEXT_RECENT_MESSAGE_COUNT
+    : CONTEXT_COMPACT_MESSAGE_THRESHOLD;
+  const exceedsMessageLimit = unsummarizedMessages.length > messageThreshold;
   const exceedsCharacterLimit =
     characterCount > CONTEXT_COMPACT_CHARACTER_THRESHOLD;
 

@@ -18,7 +18,8 @@ export type KnowledgeDocumentSummary = {
   chunkCount: number;
   status: "processing" | "ready" | "failed";
   errorMessage: string | null;
-  embeddingStatus: "pending" | "processing" | "ready" | "failed";
+  // "disabled" is a runtime capability, not a persisted job status.
+  embeddingStatus: "pending" | "processing" | "ready" | "failed" | "disabled";
   embeddingModel: string | null;
   embeddedChunkCount: number;
   embeddingError: string | null;

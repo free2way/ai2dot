@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UIMessage } from "ai";
+import { DEFAULT_SKILL_SELECTION } from "@/lib/skill-selection";
 import {
   buildConversationSummaryPrompt,
   createFallbackSummary,
@@ -22,6 +23,23 @@ describe("conversation context planning", () => {
 
     expect(plan.shouldCompact).toBe(false);
     expect(plan.messagesForModel).toEqual(messages);
+  });
+
+  it.each([11, 15, 18])("keeps all %i unsummarized messages in ordinary chat", (count) => {
+    const messages = Array.from({ length: count }, (_, index) => message(index));
+    const plan = planConversationContext({ messages, contextTarget: DEFAULT_SKILL_SELECTION.contextTarget });
+    const selected = selectSkillTargetMessages(plan.messagesForModel, DEFAULT_SKILL_SELECTION.contextTarget);
+    expect(plan.shouldCompact).toBe(false);
+    expect(selected).toEqual(messages);
+  });
+
+  it("summarizes every omitted message for an existing recent-messages selection", () => {
+    const messages = Array.from({ length: 15 }, (_, index) => message(index));
+    const plan = planConversationContext({ messages, contextTarget: "recent_messages" });
+    const selected = selectSkillTargetMessages(plan.messagesForModel, "recent_messages");
+    expect(plan.shouldCompact).toBe(true);
+    expect(selected).toHaveLength(10);
+    expect([...plan.messagesToSummarize, ...selected]).toEqual(messages);
   });
 
   it("summarizes older turns and retains the latest ten messages", () => {
