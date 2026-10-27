@@ -34,6 +34,7 @@ import type {
   SyncedPreferences,
 } from "~/lib/types";
 import "./style.css";
+import { loadPublicAuthKey, normalizePublishableKey, savePublicAuthKey } from "~/lib/auth-config";
 
 const PUBLISHABLE_KEY = process.env.PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const SYNC_HOST = process.env.PLASMO_PUBLIC_CLERK_SYNC_HOST;
@@ -431,22 +432,55 @@ function AuthGate() {
 }
 
 function SidePanel() {
-  if (!PUBLISHABLE_KEY) {
+  const [publishableKey, setPublishableKey] = useState<string | null>(normalizePublishableKey(PUBLISHABLE_KEY));
+  const [loading, setLoading] = useState(!PUBLISHABLE_KEY);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (PUBLISHABLE_KEY) return;
+    let active = true;
+    void loadPublicAuthKey().then((key) => {
+      if (active) setPublishableKey(key);
+    }).catch(() => {
+      if (active) setError("无法读取浏览器本地配置，请重试。");
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  if (loading) return <main className="configuration-error"><strong>正在读取本地登录配置…</strong></main>;
+  if (!publishableKey || editing) {
     return (
       <main className="configuration-error">
-        <strong>扩展尚未配置</strong>
-        <p>请设置 PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY 后重新构建。</p>
+        <strong>配置扩展登录</strong>
+        <p>发布包不包含登录 key。请填写 ai2dot 对应的 Clerk 公开登录参数，仅保存在当前浏览器，不会上传到 GitHub。不要填写 Secret Key。</p>
+        <form className="auth-config-form" onSubmit={(event) => {
+          event.preventDefault();
+          setSaving(true);
+          setError("");
+          void savePublicAuthKey(value).then((key) => {
+            setPublishableKey(key);
+            setValue("");
+            setEditing(false);
+          }).catch((saveError) => setError(friendlyError(saveError))).finally(() => setSaving(false));
+        }}>
+          <label>Clerk Publishable Key<input autoComplete="off" spellCheck={false} value={value} onChange={(event) => setValue(event.target.value)} placeholder="公开登录参数" required /></label>
+          {error && <p role="alert">{error}</p>}
+          <button className="primary-button" disabled={saving}>{saving ? "正在保存…" : "保存并登录"}</button>
+          {publishableKey && <button type="button" className="secondary-button" onClick={() => setEditing(false)}>取消</button>}
+        </form>
       </main>
     );
   }
 
   return (
-    <ClerkProvider
-      publishableKey={PUBLISHABLE_KEY}
-      syncHost={SYNC_HOST}
-    >
-      <AuthGate />
-    </ClerkProvider>
+    <>
+      <ClerkProvider publishableKey={publishableKey} syncHost={SYNC_HOST || "https://ai.ai2dot.com"}>
+        <AuthGate />
+      </ClerkProvider>
+      <button className="auth-config-edit" onClick={() => { setValue(""); setError(""); setEditing(true); }}>登录配置</button>
+    </>
   );
 }
 

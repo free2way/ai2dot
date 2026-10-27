@@ -1,0 +1,146 @@
+name: Component Releases
+
+on:
+  push:
+    branches: [main, feat/macos-desktop]
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component to rebuild (auto detects changes since its last release)
+        type: choice
+        default: auto
+        options: [auto, all, desktop, extension]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: component-releases
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.repository == 'free2way/ai2dot' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/macos-desktop')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      desktop: ${{ steps.plan.outputs.desktop }}
+      desktop_version: ${{ steps.plan.outputs.desktop_version }}
+      extension: ${{ steps.plan.outputs.extension }}
+      extension_version: ${{ steps.plan.outputs.extension_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - id: plan
+        run: node scripts/releases/plan.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMPONENT: ${{ inputs.component || 'auto' }}
+
+  extension:
+    needs: plan
+    if: needs.plan.outputs.extension == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: node scripts/releases/prepare.mjs extension "$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.extension_version }}
+      - run: npm ci
+        working-directory: extension
+      - run: npm test && npm run typecheck && npm run build
+        working-directory: extension
+        env:
+          PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY: ''
+      - run: node scripts/releases/package.mjs extension
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: extension-release
+          path: build/releases/extension/*
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop:
+    needs: plan
+    if: needs.plan.outputs.desktop == 'true'
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: node scripts/releases/prepare.mjs desktop "$RELEASE_VERSION"
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.desktop_version }}
+      - run: npm ci
+      - run: npm test && npm run lint && npm run typecheck
+      - run: npm run desktop:build
+      - run: node scripts/releases/package.mjs desktop
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: desktop-release
+          path: build/releases/desktop/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish-extension:
+    needs: [plan, extension]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: extension-release
+          path: build/releases/extension
+      - run: node scripts/releases/publish.mjs extension
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.extension_version }}
+
+  publish-desktop:
+    needs: [plan, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: desktop-release
+          path: build/releases/desktop
+      - run: node scripts/releases/publish.mjs desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.desktop_version }}

@@ -9,6 +9,8 @@ directories:
 files:
   - desktop/main.mjs
   - desktop/lib/**/*
+  - "!desktop/**/*.test.*"
+  - "!desktop/**/*.md"
   - package.json
   - "!node_modules/**/*"
 

@@ -134,3 +134,9 @@ button:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid #86b631;
   outline-offset: 2px;
 }
+
+.auth-config-form { display: grid; gap: 14px; }
+.auth-config-form label { color: #c6cdc3; }
+.auth-config-form input { width: 100%; min-height: 42px; border: 1px solid #697064; border-radius: 4px; padding: 9px; font: inherit; }
+.auth-config-form input:focus-visible { outline: 2px solid #b7f34a; outline-offset: 2px; }
+.auth-config-edit { width: 100%; padding: 10px; color: #466345; background: #f3f2ed; font-size: 12px; }
