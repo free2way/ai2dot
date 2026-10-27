@@ -53,6 +53,15 @@ export function reservedVersion(component, releases) {
       return right.reduce((result, part, index) => result || part - left[index], 0);
     })[0] ?? null;
 }
+export function findGithubRelease(repository, tag, query, execute) {
+  // The REST tag endpoint only returns published releases. CLI discovery also
+  // finds drafts; use its numeric ID for subsequent REST asset verification.
+  const result = query(["release", "view", tag, "--repo", repository, "--json", "databaseId"]);
+  if (result.status !== 0) return null;
+  const { databaseId } = JSON.parse(result.stdout);
+  if (!Number.isSafeInteger(databaseId) || databaseId < 1) throw new Error("Invalid GitHub release ID.");
+  return JSON.parse(execute("api", `repos/${repository}/releases/${databaseId}`));
+}
 const credentialPattern = /\b(?:[ps]k_(?:test|live)_[A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npg_[A-Za-z0-9]{12,}|AKIA[A-Z0-9]{16})\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/;
 export function assertSafeTree(directory, root = fs.realpathSync(directory)) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {

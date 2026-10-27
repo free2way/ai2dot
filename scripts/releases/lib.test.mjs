@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { affectsComponent, assertSafeTree, latestRelease, nextVersion, reservedVersion, verifyManifest, writeManifest } from "./lib.mjs";
+import { affectsComponent, assertSafeTree, findGithubRelease, latestRelease, nextVersion, reservedVersion, verifyManifest, writeManifest } from "./lib.mjs";
 
 const directories = [];
 function temp() {
@@ -44,6 +44,16 @@ describe("component release planning", () => {
   });
 });
 describe("release asset safety", () => {
+  it("loads draft assets by release ID instead of the published-only tag endpoint", () => {
+    const calls = [];
+    const draft = { id: 123, draft: true, assets: [] };
+    const result = findGithubRelease("owner/repo", "extension-v0.1.0", (args) => {
+      expect(args).toContain("databaseId");
+      return { status: 0, stdout: JSON.stringify({ databaseId: 123 }) };
+    }, (...args) => { calls.push(args); return JSON.stringify(draft); });
+    expect(result).toEqual(draft);
+    expect(calls).toEqual([["api", "repos/owner/repo/releases/123"]]);
+  });
   it("rejects configuration and credential files before packing", () => {
     const directory = temp();
     fs.writeFileSync(path.join(directory, ".env.local"), "fixture");

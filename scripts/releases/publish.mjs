@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { assertComponent, parseVersion, verifyManifest } from "./lib.mjs";
+import { assertComponent, findGithubRelease, parseVersion, verifyManifest } from "./lib.mjs";
 
 const component = assertComponent(process.argv[2]);
 const version = process.env.RELEASE_VERSION;
@@ -13,8 +13,9 @@ if (!/^[a-f0-9]{40}$/.test(sha ?? "") || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.t
 const output = path.resolve("build/releases", component);
 const assets = verifyManifest(output, component, version, sha).map((name) => path.join(output, name));
 const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
-const current = spawnSync("gh", ["api", `repos/${repository}/releases/tags/${tag}`], { encoding: "utf8" });
-let release = current.status === 0 ? JSON.parse(current.stdout) : null;
+const findRelease = () => findGithubRelease(repository, tag,
+  (args) => spawnSync("gh", args, { encoding: "utf8" }), gh);
+let release = findRelease();
 if (release && release.target_commitish !== sha) throw new Error("Refusing to overwrite a release from another commit.");
 if (release && !release.draft) {
   const names = release.assets.map((asset) => asset.name).sort();
@@ -31,7 +32,8 @@ if (!release) {
   gh("release", "create", tag, "--repo", repository, "--target", sha, "--draft", "--title", `${label} ${version}`, "--notes", notes);
 }
 gh("release", "upload", tag, ...assets, "--repo", repository, "--clobber");
-release = JSON.parse(gh("api", `repos/${repository}/releases/tags/${tag}`));
+release = findRelease();
+if (!release) throw new Error("Unable to reload the draft release for verification.");
 if (release.assets.length !== assets.length || assets.some((asset) => !release.assets.some((remote) => remote.name === path.basename(asset) && remote.size === fs.statSync(asset).size))) {
   throw new Error("Uploaded asset verification failed; release remains a draft.");
 }
