@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { affectsComponent, assertSafeTree, findGithubRelease, latestRelease, nextVersion, reservedVersion, verifyManifest, writeManifest } from "./lib.mjs";
+import { affectsComponent, assertSafeTree, findGithubRelease, latestRelease, reservedVersion, verifyManifest, versionForRun, writeManifest } from "./lib.mjs";
 
 const directories = [];
 function temp() {
@@ -12,16 +12,18 @@ function temp() {
 }
 afterEach(() => { for (const directory of directories.splice(0)) fs.rmSync(directory, { recursive: true, force: true }); });
 describe("component release planning", () => {
-  it("increments from the last published version without committing version bumps", () => {
-    expect(nextVersion("0.2.1", "0.2.1")).toBe("0.2.2");
-    expect(nextVersion("0.2.1", "0.2.5")).toBe("0.2.6");
-    expect(nextVersion("0.3.0", "0.2.5")).toBe("0.3.0");
-    expect(nextVersion("0.1.0", null)).toBe("0.1.0");
+  it("uses unique monotonic build versions without needing draft visibility", () => {
+    expect(versionForRun("0.2.1", 1)).toBe("0.2.2");
+    expect(versionForRun("0.2.1", 2)).toBe("0.2.3");
+    expect(versionForRun("0.2.1", 3)).toBe("0.2.4");
+    expect(versionForRun("0.1.0", 3)).toBe("0.1.3");
+    expect(versionForRun("0.2.1", 3)).toBe(versionForRun("0.2.1", 3));
   });
   it("respects Chrome numeric version limits", () => {
-    expect(nextVersion("0.1.0", "0.1.65535")).toBe("0.2.0");
-    expect(() => nextVersion("1.0.0-beta", null)).toThrow();
-    expect(() => nextVersion("0.0.0", null)).toThrow();
+    expect(versionForRun("0.1.65535", 1)).toBe("0.2.0");
+    expect(() => versionForRun("1.0.0-beta", 1)).toThrow();
+    expect(() => versionForRun("0.0.0", 1)).toThrow();
+    expect(() => versionForRun("0.1.0", 0)).toThrow();
   });
   it("ignores documentation and tests but includes shared web runtime changes for desktop", () => {
     expect(affectsComponent("desktop", "src/app/api/chat/route.ts")).toBe(true);
@@ -40,7 +42,12 @@ describe("component release planning", () => {
     ];
     expect(latestRelease("desktop", releases).tag_name).toBe("desktop-v0.2.1");
     expect(reservedVersion("desktop", releases)).toBe("0.2.2");
-    expect(nextVersion("0.2.1", reservedVersion("desktop", releases))).toBe("0.2.3");
+  });
+  it("keeps planning and package-installing jobs read-only", () => {
+    const workflow = fs.readFileSync(new URL("../../.github/workflows/releases.yml", import.meta.url), "utf8");
+    const beforePublishing = workflow.slice(0, workflow.indexOf("  publish-extension:"));
+    expect(beforePublishing).not.toMatch(/contents:\s*write/);
+    expect(beforePublishing).toMatch(/contents:\s*read/);
   });
 });
 describe("release asset safety", () => {

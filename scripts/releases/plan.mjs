@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
-import { COMPONENTS, affectsComponent, latestRelease, nextVersion, reservedVersion } from "./lib.mjs";
+import { COMPONENTS, affectsComponent, compareVersions, latestRelease, reservedVersion, versionForRun } from "./lib.mjs";
 
 const repository = process.env.GITHUB_REPOSITORY;
 if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? "")) throw new Error("Missing repository context.");
@@ -23,7 +23,13 @@ for (const component of COMPONENTS) {
   }
   const requested = selection === "all" || selection === component;
   const enabled = selection === "auto" ? changed : requested;
-  const version = nextVersion(base, reservedVersion(component, releases));
+  // Run numbers are monotonic across branches and survive retries. Unlike
+  // draft enumeration, they do not require repository write permission.
+  const version = versionForRun(base, process.env.GITHUB_RUN_NUMBER);
+  const previousVersion = reservedVersion(component, releases);
+  if (enabled && previousVersion && compareVersions(version, previousVersion) < 0) {
+    throw new Error("The build version would go backwards; increase the source package version before releasing.");
+  }
   outputs[component] = String(enabled);
   outputs[`${component}_version`] = version;
   outputs[`${component}_tag`] = `${component}-v${version}`;

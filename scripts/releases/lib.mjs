@@ -15,20 +15,14 @@ export function parseVersion(value) {
   }
   return parts;
 }
-export function nextVersion(base, previous) {
+export function versionForRun(base, runNumber) {
   const parts = parseVersion(base);
-  if (!previous) return base;
-  const last = parseVersion(previous);
-  const comparison = parts.reduce((result, part, index) => result || Math.sign(part - last[index]), 0);
-  if (comparison > 0) return base;
-  for (let index = 2; index >= 0; index -= 1) {
-    if (last[index] < 65535) {
-      last[index] += 1;
-      return last.join(".");
-    }
-    last[index] = 0;
-  }
-  throw new Error("Release version space is exhausted.");
+  const sequence = Number(runNumber);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error("A positive workflow run number is required.");
+  const radix = 65536;
+  const ordinal = parts[0] * radix ** 2 + parts[1] * radix + parts[2] + sequence;
+  if (!Number.isSafeInteger(ordinal) || ordinal >= radix ** 3) throw new Error("Release version space is exhausted.");
+  return [Math.floor(ordinal / radix ** 2), Math.floor(ordinal / radix) % radix, ordinal % radix].join(".");
 }
 export function affectsComponent(component, file) {
   assertComponent(component);
@@ -52,6 +46,10 @@ export function reservedVersion(component, releases) {
       const left = parseVersion(a), right = parseVersion(b);
       return right.reduce((result, part, index) => result || part - left[index], 0);
     })[0] ?? null;
+}
+export function compareVersions(left, right) {
+  const a = parseVersion(left), b = parseVersion(right);
+  return a.reduce((result, part, index) => result || Math.sign(part - b[index]), 0);
 }
 export function findGithubRelease(repository, tag, query, execute) {
   // The REST tag endpoint only returns published releases. CLI discovery also
