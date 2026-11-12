@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { useFeedback } from "@/lib/feedback";
 import { MCP_PRESETS, type McpPreset } from "@/lib/mcp-presets";
 
 export type McpSourceSummary = {
@@ -82,6 +83,7 @@ export function McpSourceManager({
   const [showSecret, setShowSecret] = useState(false);
   const [busyId, setBusyId] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const { confirm } = useFeedback();
 
   const refreshSources = async () => {
     const response = await fetch("/api/admin/mcp-sources", { cache: "no-store" });
@@ -207,7 +209,15 @@ export function McpSourceManager({
   };
 
   const deleteSource = async (source: McpSourceSummary) => {
-    if (!window.confirm(`删除“${source.name}”及其工具配置？`)) return;
+    if (
+      !(await confirm({
+        message: `删除“${source.name}”及其工具配置？`,
+        description: "此操作无法撤销。",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))
+    )
+      return;
     setBusyId(source.id);
     try {
       const response = await fetch(`/api/admin/mcp-sources/${source.id}`, { method: "DELETE" });

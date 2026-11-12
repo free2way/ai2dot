@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
 import { ChatWorkspace } from "@/components/chat/chat-workspace";
+import { summarizeMcpDependencySource } from "@/lib/mcp-presets";
 import { FEATURED_MODELS } from "@/lib/models";
 import {
   getAuthMode,
@@ -115,12 +116,9 @@ export default async function ConversationPage({
       } : undefined}
       initialKnowledgeBases={knowledgeBases}
       initialMcpSources={mcpSources.map((source) => ({
-        id: source.id,
+        ...summarizeMcpDependencySource(source),
         name: source.name,
         transport: source.transport,
-        enabled: source.enabled,
-        toolCount: source.tools.length,
-        templateId: source.templateId,
       }))}
       initialSkills={skills.map((skill) => ({
         id: skill.id,

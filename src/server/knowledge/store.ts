@@ -390,7 +390,7 @@ export async function indexKnowledgeDocument(
       .update(knowledgeDocuments)
       .set({
         status: "failed",
-        errorMessage: error instanceof Error ? error.message.slice(0, 500) : "索引失败",
+        errorMessage: "文档索引失败。",
         updatedAt: new Date(),
       })
       .where(eq(knowledgeDocuments.id, input.documentId));
@@ -434,6 +434,50 @@ export async function failKnowledgeDocument(
     .where(eq(knowledgeDocuments.id, input.documentId))
     .returning({ id: knowledgeDocuments.id });
   return updated ?? null;
+}
+
+export async function retryKnowledgeDocumentEmbedding(
+  context: WorkspaceContext,
+  input: { knowledgeBaseId: string; documentId: string },
+) {
+  const [ownedDocument] = await getDb()
+    .select({ id: knowledgeDocuments.id, status: knowledgeDocuments.status })
+    .from(knowledgeDocuments)
+    .innerJoin(
+      knowledgeBases,
+      eq(knowledgeBases.id, knowledgeDocuments.knowledgeBaseId),
+    )
+    .where(
+      and(
+        eq(knowledgeDocuments.id, input.documentId),
+        eq(knowledgeDocuments.knowledgeBaseId, input.knowledgeBaseId),
+        eq(knowledgeBases.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!ownedDocument) return null;
+  if (ownedDocument.status !== "ready" || !isKnowledgeEmbeddingConfigured()) {
+    return { id: ownedDocument.id, retried: false as const };
+  }
+
+  return getDb().transaction(async (tx) => {
+    const [updated] = await tx
+      .update(knowledgeDocuments)
+      .set({
+        embeddingStatus: "pending",
+        embeddingError: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(knowledgeDocuments.id, ownedDocument.id),
+        eq(knowledgeDocuments.status, "ready"),
+        eq(knowledgeDocuments.embeddingStatus, "failed"),
+      ))
+      .returning({ id: knowledgeDocuments.id });
+    if (!updated) return { id: ownedDocument.id, retried: false as const };
+    await enqueueKnowledgeEmbeddingJob(context, input, tx);
+    return { id: ownedDocument.id, retried: true as const };
+  });
 }
 
 export async function deleteKnowledgeDocument(

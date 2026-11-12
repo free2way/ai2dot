@@ -6,9 +6,11 @@ import {
 } from "@clerk/chrome-extension";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiError,
   getBootstrap,
   openKnowledgeBaseManagement,
   openModelManagement,
+  openWorkspaceWithKnowledgeBase,
   summarizePage,
   uploadMarkdown,
   waitForKnowledgeDocument,
@@ -44,6 +46,7 @@ type WorkState =
   | "extracting"
   | "summarizing"
   | "uploading"
+  | "queued"
   | "uploaded";
 
 function friendlyError(error: unknown) {
@@ -61,6 +64,7 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
   const [source, setSource] = useState<{ sourceUrl: string; sourceTitle: string } | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [state, setState] = useState<WorkState>("ready");
+  const [uploadedKnowledgeBaseId, setUploadedKnowledgeBaseId] = useState<string>();
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(false);
@@ -181,6 +185,8 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
 
   async function handleUpload() {
     if (!markdown || !preferences.defaultKnowledgeBaseId) return;
+    const knowledgeBaseId = preferences.defaultKnowledgeBaseId;
+    let accepted = false;
     setError("");
     setState("uploading");
     try {
@@ -188,17 +194,23 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
       if (!token) throw new Error("登录会话已失效，请重新登录。");
       const uploaded = await uploadMarkdown({
         token,
-        knowledgeBaseId: preferences.defaultKnowledgeBaseId,
+        knowledgeBaseId,
         name: markdownFileName(source?.sourceTitle || "网页摘要"),
         content: markdown,
       });
+      accepted = true;
+      setUploadedKnowledgeBaseId(knowledgeBaseId);
       await waitForKnowledgeDocument({
-        token,
-        knowledgeBaseId: preferences.defaultKnowledgeBaseId,
+        getToken,
+        knowledgeBaseId,
         documentId: uploaded.document.id,
       });
       setState("uploaded");
     } catch (uploadError) {
+      if (accepted && !(uploadError instanceof ApiError && uploadError.code === "KNOWLEDGE_INDEX_FAILED")) {
+        setState("queued");
+        return;
+      }
       setError(friendlyError(uploadError));
       setState("ready");
     }
@@ -316,10 +328,10 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
         </div>
         <textarea
           aria-label="Markdown 内容"
-          disabled={state === "extracting"}
+          disabled={busy}
           onChange={(event) => {
             setMarkdown(event.target.value);
-            if (state === "uploaded") setState("ready");
+            if (state === "uploaded" || state === "queued") setState("ready");
             if (source && storageScope) {
               void saveDraft(storageScope, {
                 ...source,
@@ -349,12 +361,13 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
           <select
             disabled={!bootstrap || busy}
             value={preferences.defaultKnowledgeBaseId || ""}
-            onChange={(event) =>
+            onChange={(event) => {
+              if (state === "uploaded" || state === "queued") setState("ready");
               void updatePreferences({
                 ...preferences,
                 defaultKnowledgeBaseId: event.target.value,
-              })
-            }
+              });
+            }}
           >
             {!bootstrap?.knowledgeBases.length ? (
               <option value="">暂无知识库</option>
@@ -372,16 +385,24 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
           </button>
           <button
             className="primary-button"
-            disabled={!markdown || !preferences.defaultKnowledgeBaseId || busy}
+            disabled={!markdown || !preferences.defaultKnowledgeBaseId || busy || state === "queued" || state === "uploaded"}
             onClick={() => void handleUpload()}
           >
             {state === "uploading"
               ? "正在上传并索引"
               : state === "uploaded"
                 ? "已保存"
-                : "保存到知识库"}
+                : state === "queued" ? "已提交，待确认索引状态" : "保存到知识库"}
           </button>
         </div>
+        {state === "uploaded" && uploadedKnowledgeBaseId ? (
+          <button
+            className="text-button use-in-chat"
+            onClick={() => void openWorkspaceWithKnowledgeBase(uploadedKnowledgeBaseId)}
+          >
+            在对话中使用这个知识库 →
+          </button>
+        ) : null}
       </section>
     </main>
   );

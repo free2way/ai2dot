@@ -94,20 +94,18 @@ describe("provider catalog redirects", () => {
     ]);
   });
 
-  it.each(["https://8.8.8.8/models", "https://1.1.1.1:8443/models"])(
-    "drops credentials when redirecting to %s, including a redirect back",
+  it.each(["https://other.example/models", "https://1.1.1.1:8443/models", "http://1.1.1.1/models"])(
+    "rejects redirects to a different origin %s before sending a request",
     async (location) => {
-      const requests = mockRedirects([location, "/redirect", "https://1.1.1.1/models"]);
-      await fetchProviderCatalog(provider);
-      expect(requests.map((request) => request.authorization)).toEqual([
-        "Bearer test-provider-key", null, null, null,
-      ]);
+      const requests = mockRedirects([location]);
+      await expect(fetchProviderCatalog(provider)).rejects.toThrow("configured origin");
+      expect(requests).toHaveLength(1);
     },
   );
 
   it("rejects redirects to private addresses before making another request", async () => {
     const requests = mockRedirects(["https://127.0.0.1/models"]);
-    await expect(fetchProviderCatalog(provider)).rejects.toThrow("Private");
+    await expect(fetchProviderCatalog(provider)).rejects.toThrow("configured origin");
     expect(requests).toHaveLength(1);
   });
 });

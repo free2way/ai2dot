@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { useFeedback } from "@/lib/feedback";
 
 export type SkillSummary = {
   id: string;
@@ -70,6 +71,7 @@ export function SkillManager({
   const [formState, setFormState] = useState<FormState>(EMPTY_FORM);
   const [busyId, setBusyId] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const { confirm } = useFeedback();
 
   const refreshSkills = async () => {
     const response = await fetch("/api/admin/skills", { cache: "no-store" });
@@ -176,7 +178,15 @@ export function SkillManager({
   };
 
   const deleteSkill = async (skill: SkillSummary) => {
-    if (!window.confirm(`删除 Skill“${skill.name}”？`)) return;
+    if (
+      !(await confirm({
+        message: `删除 Skill“${skill.name}”？`,
+        description: "此操作无法撤销。",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))
+    )
+      return;
     setBusyId(skill.id);
     try {
       const response = await fetch(`/api/admin/skills/${skill.id}`, { method: "DELETE" });

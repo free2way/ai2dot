@@ -162,7 +162,7 @@ export async function uploadMarkdown({
   form.set("name", name);
   form.set("content", content);
   const response = await fetch(
-    `${API_ORIGIN}/api/knowledge-bases/${knowledgeBaseId}/documents`,
+    `${API_ORIGIN}/api/extension/knowledge-bases/${knowledgeBaseId}/documents`,
     {
       method: "POST",
       headers: authorization(token),
@@ -176,20 +176,24 @@ export async function uploadMarkdown({
 }
 
 export async function waitForKnowledgeDocument({
-  token,
+  getToken,
   knowledgeBaseId,
   documentId,
 }: {
-  token: string;
+  getToken: () => Promise<string | null>;
   knowledgeBaseId: string;
   documentId: string;
 }) {
+  const signal = AbortSignal.timeout(60_000);
   for (let attempt = 0; attempt < 40; attempt += 1) {
+    const token = await getToken();
+    if (!token) throw new ApiError("登录会话已失效，请重新登录。", "UNAUTHENTICATED", 401);
     const response = await fetch(
-      `${API_ORIGIN}/api/knowledge-bases/${knowledgeBaseId}`,
+      `${API_ORIGIN}/api/extension/knowledge-bases/${knowledgeBaseId}/documents`,
       {
         headers: authorization(token),
         cache: "no-store",
+        signal,
       },
     );
     if (!response.ok) throw await parseError(response);
@@ -224,4 +228,12 @@ export function openModelManagement() {
 
 export function openKnowledgeBaseManagement() {
   return chrome.tabs.create({ url: `${API_ORIGIN}/knowledge` });
+}
+
+export function workspaceUrlForKnowledgeBase(knowledgeBaseId: string) {
+  return `${API_ORIGIN}/workspace?kb=${encodeURIComponent(knowledgeBaseId)}`;
+}
+
+export function openWorkspaceWithKnowledgeBase(knowledgeBaseId: string) {
+  return chrome.tabs.create({ url: workspaceUrlForKnowledgeBase(knowledgeBaseId) });
 }

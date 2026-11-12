@@ -32,8 +32,9 @@ const LOCK_TIMEOUT_MS = 10 * 60 * 1_000;
 export async function enqueueKnowledgeEmbeddingJob(
   context: WorkspaceContext,
   input: { knowledgeBaseId: string; documentId: string },
+  db: Pick<ReturnType<typeof getDb>, "insert"> = getDb(),
 ) {
-  await getDb()
+  await db
     .insert(knowledgeEmbeddingJobs)
     .values({
       workspaceId: context.workspaceId,
@@ -204,9 +205,8 @@ async function processClaimedJob(
 
 async function failEmbeddingJob(
   job: NonNullable<Awaited<ReturnType<typeof claimEmbeddingJob>>>,
-  error: unknown,
 ) {
-  const message = error instanceof Error ? error.message : "Embedding 任务失败。";
+  const message = "语义索引失败，请检查模型供应商配置后重试。";
   const exhausted = job.attempts >= MAX_ATTEMPTS;
   const delayMs = Math.min(15 * 60_000, 2 ** Math.max(0, job.attempts - 1) * 30_000);
   const now = new Date();
@@ -257,9 +257,9 @@ export async function processKnowledgeEmbeddingJobs({
       );
       result.embedded += processed.embedded;
       if (processed.completed) result.completed += 1;
-    } catch (error) {
+    } catch {
       result.failed += 1;
-      await failEmbeddingJob(job, error);
+      await failEmbeddingJob(job);
     }
   }
   return result;

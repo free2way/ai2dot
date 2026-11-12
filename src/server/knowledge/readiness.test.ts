@@ -8,7 +8,7 @@ import { eq } from "drizzle-orm";
 import type { getDb } from "@/server/db";
 import type { WorkspaceContext } from "@/server/db/workspace";
 import * as schema from "@/server/db/schema";
-import { addKnowledgeDocument, listKnowledgeDocuments, searchKnowledge } from "./store";
+import { addKnowledgeDocument, listKnowledgeDocuments, retryKnowledgeDocumentEmbedding, searchKnowledge } from "./store";
 import { getNotebookGenerationContext } from "@/server/notebooks/store";
 
 const mocks = vi.hoisted(() => ({ db: null as ReturnType<typeof getDb> | null, embeddingConfigured: false }));
@@ -65,5 +65,27 @@ describe("knowledge readiness without semantic configuration", () => {
     const other = { ...context, workspaceId: "00000000-0000-4000-8000-000000000001" };
     expect(await getNotebookGenerationContext(other, notebookId)).toBeNull();
     expect(await listKnowledgeDocuments(other, baseId)).toBeNull();
+  });
+  it("requeues only a failed, owned document and accepts a concurrent retry only once", async () => {
+    mocks.embeddingConfigured = true;
+    const target = { knowledgeBaseId: baseId, documentId };
+    const documents = schema.knowledgeDocuments;
+    const jobs = schema.knowledgeEmbeddingJobs;
+    try {
+      expect(await retryKnowledgeDocumentEmbedding(context, target)).toMatchObject({ retried: false });
+      await db.update(documents).set({ embeddingStatus: "failed" }).where(eq(documents.id, documentId));
+      await db.update(jobs).set({ status: "failed", attempts: 5 }).where(eq(jobs.documentId, documentId));
+      const other = { ...context, workspaceId: "00000000-0000-4000-8000-000000000001" };
+      expect(await retryKnowledgeDocumentEmbedding(other, target)).toBeNull();
+      const results = await Promise.all([
+        retryKnowledgeDocumentEmbedding(context, target),
+        retryKnowledgeDocumentEmbedding(context, target),
+      ]);
+      expect(results.filter((result) => result?.retried)).toHaveLength(1);
+      const [job] = await db.select().from(jobs).where(eq(jobs.documentId, documentId));
+      expect(job).toMatchObject({ status: "pending", attempts: 0 });
+    } finally {
+      mocks.embeddingConfigured = false;
+    }
   });
 });
