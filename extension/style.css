@@ -140,3 +140,47 @@ button:focus-visible, select:focus-visible, textarea:focus-visible {
 .auth-config-form input { width: 100%; min-height: 42px; border: 1px solid #697064; border-radius: 4px; padding: 9px; font: inherit; }
 .auth-config-form input:focus-visible { outline: 2px solid #b7f34a; outline-offset: 2px; }
 .auth-config-edit { width: 100%; padding: 10px; color: #466345; background: #f3f2ed; font-size: 12px; }
+
+/* Shared brand tokens (mirrors --acid / --danger / --line in the web app). */
+:root {
+  --dot-acid: #b7f34a;
+  --dot-acid-ink: #23320d;
+  --dot-danger: #c34e42;
+  --dot-surface: #fff;
+  --dot-page: #f3f2ed;
+  --dot-line: #cfd2ca;
+  --dot-text: #20251f;
+  --dot-muted: #737a71;
+  color-scheme: light dark;
+}
+
+.use-in-chat { justify-self: start; font-weight: 700; }
+.use-in-chat:hover { text-decoration: underline; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --dot-surface: #222722;
+    --dot-page: #171a17;
+    --dot-line: #3a413a;
+    --dot-text: #e6e9e1;
+    --dot-muted: #9aa396;
+    color: var(--dot-text);
+    background: var(--dot-page);
+  }
+  body { background: var(--dot-page); }
+  .control-section, .editor-section, .save-section { border-bottom-color: var(--dot-line); }
+  label { color: #b9c0b5; }
+  select, textarea, .secondary-button, .template-control button {
+    color: var(--dot-text);
+    background: var(--dot-surface);
+    border-color: var(--dot-line);
+  }
+  .template-control { border-color: var(--dot-line); }
+  .template-control button { border-right-color: var(--dot-line); }
+  .template-control button.active { color: var(--dot-acid-ink); background: var(--dot-acid); }
+  .text-button, .use-in-chat { color: var(--dot-acid); }
+  .source-strip { background: #1f241f; border-bottom-color: var(--dot-line); }
+  .source-strip span, .editor-heading small { color: var(--dot-muted); }
+  .error-message { color: #ffb4aa; background: #3a1f1c; }
+  .auth-config-edit { color: var(--dot-acid); background: var(--dot-page); }
+}

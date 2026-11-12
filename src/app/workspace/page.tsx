@@ -15,7 +15,16 @@ import { isExplicitSkillsEnabled } from "@/server/skills/config";
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkspacePage() {
+export default async function WorkspacePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ kb?: string | string[] }>;
+}) {
+  const requestedKb = (await searchParams).kb;
+  const requestedKnowledgeBaseIds = (Array.isArray(requestedKb) ? requestedKb : requestedKb ? [requestedKb] : [])
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
   const authMode = getAuthMode();
   const authConfigured = isAuthConfigured();
   const canPersist = authConfigured && isPersistenceConfigured();
@@ -55,6 +64,9 @@ export default async function WorkspacePage() {
       initialUserName={userName}
       initialConversations={conversationList}
       initialKnowledgeBases={knowledgeBases}
+      initialKnowledgeBaseIds={requestedKnowledgeBaseIds
+        .filter((id) => knowledgeBases.some((base) => base.id === id))
+        .slice(0, 3)}
       initialMcpSources={mcpSources.map((source) => ({
         id: source.id,
         name: source.name,

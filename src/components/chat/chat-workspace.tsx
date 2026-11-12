@@ -68,6 +68,7 @@ import { chatDraftKey, parseChatDraft } from "@/lib/chat-draft";
 import { getMessageSkillResolution, hasPendingToolApproval } from "@/lib/skill-execution";
 import { createClientUuid } from "@/lib/client-uuid";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
+import { useFeedback } from "@/lib/feedback";
 import type {
   ConversationBranch,
   ConversationListItem,
@@ -365,6 +366,7 @@ export function ChatWorkspace({
   initialSkills = [],
 }: ChatWorkspaceProps) {
   const { language, t } = useLanguage();
+  const { confirm } = useFeedback();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [speechAvailability, setSpeechAvailability] = useState<
@@ -671,6 +673,7 @@ export function ChatWorkspace({
     }
   }, [historyReady, messages, persistenceEnabled]);
 
+  const hasInitialKnowledgeSelection = initialKnowledgeBaseIds.length > 0;
   useEffect(() => {
     if (
       !persistenceEnabled ||
@@ -678,6 +681,15 @@ export function ChatWorkspace({
       initialAssistant
     ) return;
     const timer = window.setTimeout(() => {
+      if (hasInitialKnowledgeSelection) {
+        // An explicit selection (e.g. "use this knowledge base in chat" link) wins
+        // over the remembered one, and becomes the new remembered selection.
+        window.localStorage.setItem(
+          KNOWLEDGE_SELECTION_KEY,
+          JSON.stringify(initialKnowledgeBaseIds.slice(0, 3)),
+        );
+        return;
+      }
       try {
         const saved = JSON.parse(
           window.localStorage.getItem(KNOWLEDGE_SELECTION_KEY) ?? "[]",
@@ -690,7 +702,9 @@ export function ChatWorkspace({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [initialAssistant, initialKnowledgeBases, persistenceEnabled]);
+    // initialKnowledgeBaseIds is only read when hasInitialKnowledgeSelection flips.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasInitialKnowledgeSelection, initialAssistant, initialKnowledgeBases, persistenceEnabled]);
 
   const toggleKnowledgeBase = (knowledgeBaseId: string) => {
     setSelectedKnowledgeBaseIds((current) => {
@@ -1315,7 +1329,17 @@ export function ChatWorkspace({
   };
 
   const removeConversation = async (conversation: ConversationListItem) => {
-    if (!window.confirm(`删除会话“${conversation.title}”及其全部消息？`)) return;
+    if (
+      !(await confirm({
+        message: t("删除会话“{{name}}”及其全部消息？", {
+          name: conversation.title,
+        }),
+        description: t("此操作无法撤销。"),
+        tone: "danger",
+        confirmLabel: t("删除"),
+      }))
+    )
+      return;
     setSessionBusyId(conversation.id);
     setCloudError(undefined);
     try {
@@ -1628,7 +1652,7 @@ export function ChatWorkspace({
               </div>
             )}
             <div className="composer-toolbar">
-              <div><button type="button" className={`tool-chip${useDeepThinking ? " is-active" : ""}`} disabled={!supportsDeepThinking} aria-pressed={useDeepThinking} title={supportsDeepThinking ? t("为下一次回答使用高强度推理") : t("当前模型不支持深度思考")} onClick={() => setDeepThinkingEnabled((enabled) => !enabled)}><Sparkles size={14} /> {t("深度思考")}</button><button type="button" className={`tool-chip${skillSelection.refs.length > 0 || skillSelection.mode === "manual" ? " is-active" : ""}`} aria-expanded={skillPickerOpen} disabled={!persistenceEnabled || !explicitSkillsEnabled || skillControlsLocked} onClick={() => setSkillPickerOpen((open) => !open)}><BookOpen size={14} /> Skills {skillSelection.refs.length > 0 ? skillSelection.refs.length : skillSelection.mode === "auto" ? "自动" : ""}</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> {t("知识库 {{count}}", { count: selectedKnowledgeBases.length })}</button>}</div>
+              <div><button type="button" className={`tool-chip${useDeepThinking ? " is-active" : ""}`} disabled={!supportsDeepThinking} aria-pressed={useDeepThinking} title={supportsDeepThinking ? t("为下一次回答使用高强度推理") : t("当前模型不支持深度思考")} onClick={() => setDeepThinkingEnabled((enabled) => !enabled)}><Sparkles size={14} /> {t("深度思考")}</button><button type="button" className={`tool-chip${skillSelection.refs.length > 0 || skillSelection.mode === "manual" ? " is-active" : ""}`} aria-expanded={skillPickerOpen} disabled={!persistenceEnabled || !explicitSkillsEnabled || skillControlsLocked} onClick={() => setSkillPickerOpen((open) => !open)}><BookOpen size={14} /> Skills {skillSelection.refs.length > 0 ? skillSelection.refs.length : skillSelection.mode === "auto" ? "自动" : ""}</button>{selectedKnowledgeBases.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Archive size={14} /> {t("知识库 {{count}}", { count: selectedKnowledgeBases.length })}</button>}{selectedMcpSourceIds.length > 0 && <button type="button" className="tool-chip is-active" onClick={() => setInspectorOpen(true)}><Wrench size={14} /> MCP {selectedMcpSourceIds.length}</button>}</div>
               <div className="composer-primary-actions">
                 <button
                   className={`voice-input-button${isListening ? " is-listening" : ""}`}
@@ -1768,6 +1792,8 @@ export function ChatWorkspace({
             <Link className="knowledge-manage-link" href="/knowledge">{t("管理知识库")}</Link>
           </section>
         )}
+        <details className="inspector-advanced">
+          <summary>{t("高级")}</summary>
         <section className="inspector-section">
           <div className="section-title"><span>{t("助手指令")}</span><Settings2 size={15} /></div>
           <p className="instruction-copy">{initialAssistant ? t("当前会话由“{{name}}”的专用指令驱动。", { name: assistantName }) : t("可靠、简洁且主动。优先给出明确结论，再补充必要解释。")}</p>
@@ -1776,6 +1802,7 @@ export function ChatWorkspace({
           <div className="section-title"><span>{t("当前能力")}</span><small>{selectedModel?.capabilities.length}</small></div>
           <div className="capability-list">{selectedModel?.capabilities.map((capability) => <span key={capability}><Check size={12} /> {capability}</span>)}</div>
         </section>
+        </details>
         <div className="inspector-note"><span className={gatewayEnabled ? "status-live" : "status-demo"} /><p>{gatewayEnabled ? t("请求通过工作区配置的模型供应商安全转发。") : authEnabled ? t("前往模型管理，添加自己的 API Key 后启用真实模型。") : t("登录后可配置自己的模型供应商。")}</p></div>
       </aside>
     </main>

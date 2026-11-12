@@ -9,6 +9,7 @@ import {
   getBootstrap,
   openKnowledgeBaseManagement,
   openModelManagement,
+  openWorkspaceWithKnowledgeBase,
   summarizePage,
   uploadMarkdown,
   waitForKnowledgeDocument,
@@ -61,6 +62,7 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
   const [source, setSource] = useState<{ sourceUrl: string; sourceTitle: string } | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [state, setState] = useState<WorkState>("ready");
+  const [uploadedKnowledgeBaseId, setUploadedKnowledgeBaseId] = useState<string>();
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(false);
@@ -197,6 +199,7 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
         knowledgeBaseId: preferences.defaultKnowledgeBaseId,
         documentId: uploaded.document.id,
       });
+      setUploadedKnowledgeBaseId(preferences.defaultKnowledgeBaseId);
       setState("uploaded");
     } catch (uploadError) {
       setError(friendlyError(uploadError));
@@ -382,6 +385,14 @@ function AuthenticatedPanel({ userId }: { userId: string }) {
                 : "保存到知识库"}
           </button>
         </div>
+        {state === "uploaded" && uploadedKnowledgeBaseId ? (
+          <button
+            className="text-button use-in-chat"
+            onClick={() => void openWorkspaceWithKnowledgeBase(uploadedKnowledgeBaseId)}
+          >
+            在对话中使用这个知识库 →
+          </button>
+        ) : null}
       </section>
     </main>
   );

@@ -17,6 +17,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useFeedback } from "@/lib/feedback";
 import { BrandMark } from "@/components/brand-mark";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import {
@@ -64,6 +65,7 @@ export function AssistantManager({
   skills = [],
 }: Props) {
   const { t } = useLanguage();
+  const { confirm } = useFeedback();
   const router = useRouter();
   const [assistants, setAssistants] = useState(initialAssistants);
   const [selectedId, setSelectedId] = useState<string | undefined>(
@@ -215,7 +217,16 @@ export function AssistantManager({
 
   const removeAssistant = async () => {
     if (!selectedAssistant) return;
-    if (!window.confirm(`删除助手“${selectedAssistant.name}”？已有会话会保留。`)) return;
+    if (
+      !(await confirm({
+        message: t("删除助手“{{name}}”？已有会话会保留。", {
+          name: selectedAssistant.name,
+        }),
+        tone: "danger",
+        confirmLabel: t("删除"),
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const response = await fetch(`/api/assistants/${selectedAssistant.id}`, {

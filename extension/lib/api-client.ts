@@ -225,3 +225,11 @@ export function openModelManagement() {
 export function openKnowledgeBaseManagement() {
   return chrome.tabs.create({ url: `${API_ORIGIN}/knowledge` });
 }
+
+export function workspaceUrlForKnowledgeBase(knowledgeBaseId: string) {
+  return `${API_ORIGIN}/workspace?kb=${encodeURIComponent(knowledgeBaseId)}`;
+}
+
+export function openWorkspaceWithKnowledgeBase(knowledgeBaseId: string) {
+  return chrome.tabs.create({ url: workspaceUrlForKnowledgeBase(knowledgeBaseId) });
+}

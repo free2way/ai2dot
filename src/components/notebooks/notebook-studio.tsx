@@ -29,6 +29,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFeedback } from "@/lib/feedback";
 import { BrandMark } from "@/components/brand-mark";
 import { MarkdownContent } from "@/components/chat/markdown-content";
 import { LanguageSwitcher } from "@/lib/i18n";
@@ -79,6 +80,7 @@ export function NotebookStudio({
   const [tab, setTab] = useState<Tab>("sources");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+  const { confirm } = useFeedback();
   const [createOpen, setCreateOpen] = useState(initialNotebooks.length === 0);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
@@ -257,7 +259,16 @@ export function NotebookStudio({
   };
 
   const deleteSource = async (documentId: string, name: string) => {
-    if (!detail || !window.confirm(`删除来源“${name}”？`)) return;
+    if (!detail) return;
+    if (
+      !(await confirm({
+        message: `删除来源“${name}”？`,
+        description: "此操作无法撤销。",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const response = await fetch(
@@ -314,7 +325,16 @@ export function NotebookStudio({
   };
 
   const deleteArtifact = async (artifactId: string) => {
-    if (!detail || !window.confirm("删除这个研究产物？")) return;
+    if (!detail) return;
+    if (
+      !(await confirm({
+        message: "删除这个研究产物？",
+        description: "此操作无法撤销。",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))
+    )
+      return;
     const response = await fetch(`/api/notebooks/${detail.id}/artifacts/${artifactId}`, {
       method: "DELETE",
     });
@@ -393,7 +413,16 @@ export function NotebookStudio({
   };
 
   const deleteCurrentNotebook = async () => {
-    if (!detail || !window.confirm(`删除“${detail.title}”及其全部本地来源和研究产物？`)) return;
+    if (!detail) return;
+    if (
+      !(await confirm({
+        message: `删除“${detail.title}”及其全部本地来源和研究产物？`,
+        description: "此操作无法撤销。",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const response = await fetch(`/api/notebooks/${detail.id}`, { method: "DELETE" });

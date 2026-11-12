@@ -172,7 +172,7 @@ export async function startKnowledgeIngestion(
         knowledgeBaseId,
         documentId: document.id,
         error,
-      });
+      }).catch(() => undefined);
       logServerEvent("error", "knowledge.document_failed", {
         ...fields,
         error: error instanceof Error ? error.message : String(error),

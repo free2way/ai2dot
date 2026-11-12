@@ -436,6 +436,51 @@ export async function failKnowledgeDocument(
   return updated ?? null;
 }
 
+export async function retryKnowledgeDocumentEmbedding(
+  context: WorkspaceContext,
+  input: { knowledgeBaseId: string; documentId: string },
+) {
+  const [ownedDocument] = await getDb()
+    .select({ id: knowledgeDocuments.id, status: knowledgeDocuments.status })
+    .from(knowledgeDocuments)
+    .innerJoin(
+      knowledgeBases,
+      eq(knowledgeBases.id, knowledgeDocuments.knowledgeBaseId),
+    )
+    .where(
+      and(
+        eq(knowledgeDocuments.id, input.documentId),
+        eq(knowledgeDocuments.knowledgeBaseId, input.knowledgeBaseId),
+        eq(knowledgeBases.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!ownedDocument) return null;
+  // Parsing must succeed before we can embed; a failed parse has no chunks to
+  // retry and would need the original upload, which we do not retain.
+  if (ownedDocument.status !== "ready") {
+    return { id: ownedDocument.id, retried: false as const };
+  }
+
+  if (!isKnowledgeEmbeddingConfigured()) {
+    return { id: ownedDocument.id, retried: false as const };
+  }
+
+  await getDb()
+    .update(knowledgeDocuments)
+    .set({
+      embeddingStatus: "pending",
+      embeddingError: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(knowledgeDocuments.id, input.documentId));
+  await enqueueKnowledgeEmbeddingJob(context, {
+    knowledgeBaseId: input.knowledgeBaseId,
+    documentId: input.documentId,
+  });
+  return { id: ownedDocument.id, retried: true as const };
+}
+
 export async function deleteKnowledgeDocument(
   context: WorkspaceContext,
   knowledgeBaseId: string,

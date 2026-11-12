@@ -8,6 +8,7 @@ import {
   FileText,
   LoaderCircle,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
@@ -22,6 +23,7 @@ import {
   useState,
 } from "react";
 import { BrandMark } from "@/components/brand-mark";
+import { useFeedback } from "@/lib/feedback";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import type {
   KnowledgeBaseSummary,
@@ -47,6 +49,7 @@ export function KnowledgeManager({
   initialKnowledgeBases: KnowledgeBaseSummary[];
 }) {
   const { t } = useLanguage();
+  const { confirm, toast } = useFeedback();
   const [knowledgeBases, setKnowledgeBases] = useState(initialKnowledgeBases);
   const [selectedId, setSelectedId] = useState<string | undefined>(
     initialKnowledgeBases[0]?.id,
@@ -201,7 +204,16 @@ export function KnowledgeManager({
   };
 
   const removeDocument = async (document: KnowledgeDocumentSummary) => {
-    if (!selectedId || !window.confirm(`删除“${document.name}”？`)) return;
+    if (
+      !selectedId ||
+      !(await confirm({
+        message: t("删除“{{name}}”？", { name: document.name }),
+        description: t("此操作无法撤销。"),
+        tone: "danger",
+        confirmLabel: t("删除"),
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const response = await fetch(
@@ -211,24 +223,54 @@ export function KnowledgeManager({
       if (!response.ok) throw new Error();
       setDocuments((items) => items.filter((item) => item.id !== document.id));
       await refresh(selectedId);
-      setNotice("文档已删除。");
+      toast(t("文档已删除。"), "success");
     } catch {
-      setNotice("文档删除失败，请稍后重试。");
+      toast(t("文档删除失败，请稍后重试。"), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retryDocument = async (document: KnowledgeDocumentSummary) => {
+    if (!selectedId) return;
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `/api/knowledge-bases/${selectedId}/documents/${document.id}`,
+        { method: "POST" },
+      );
+      const payload = (await response.json()) as { message?: string };
+      if (!response.ok) throw new Error(payload.message || "重试失败。");
+      await loadDocuments(selectedId);
+      toast(t("已重新加入语义索引队列。"), "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : t("重试失败。"), "error");
     } finally {
       setBusy(false);
     }
   };
 
   const removeBase = async () => {
-    if (!selectedBase || !window.confirm(`删除知识库“${selectedBase.name}”及全部文档？`)) return;
+    if (
+      !selectedBase ||
+      !(await confirm({
+        message: t("删除知识库“{{name}}”及全部文档？", {
+          name: selectedBase.name,
+        }),
+        description: t("此操作无法撤销。"),
+        tone: "danger",
+        confirmLabel: t("删除"),
+      }))
+    )
+      return;
     setBusy(true);
     try {
       const response = await fetch(`/api/knowledge-bases/${selectedBase.id}`, { method: "DELETE" });
       if (!response.ok) throw new Error();
       await refresh(undefined);
-      setNotice("知识库已删除。");
+      toast(t("知识库已删除。"), "success");
     } catch {
-      setNotice("知识库删除失败，请稍后重试。");
+      toast(t("知识库删除失败，请稍后重试。"), "error");
     } finally {
       setBusy(false);
     }
@@ -320,11 +362,14 @@ export function KnowledgeManager({
                 <section className="knowledge-documents">
                 <div className="knowledge-section-title"><span>{t("文档")}</span><small>PDF / DOCX / TXT / Markdown / CSV / JSON · {t("单文件不超过 4MB")}</small></div>
                   {documents.length > 0 ? documents.map((document) => (
-                    <div className="knowledge-document-row" key={document.id}>
+                    <div className={`knowledge-document-row${document.status === "ready" && document.embeddingStatus === "failed" ? " has-retry" : ""}`} key={document.id}>
                       <span className="knowledge-file-icon"><FileText size={17} /></span>
                       <span><strong>{document.name}</strong><small>{formatBytes(document.byteSize)} · {document.characterCount.toLocaleString()} 字符 · {document.chunkCount} 个片段 · {document.embeddedChunkCount} 个语义向量{document.errorMessage ? ` · ${document.errorMessage}` : document.embeddingError ? ` · ${t(document.embeddingError)}` : ""}</small></span>
-                      <em data-status={document.status === "failed" || document.embeddingStatus === "failed" ? "failed" : document.status === "processing" || document.embeddingStatus === "processing" || document.embeddingStatus === "pending" ? "processing" : "ready"}>{document.status === "failed" || document.embeddingStatus === "failed" ? t("失败") : document.status === "processing" ? t("解析中") : document.embeddingStatus === "disabled" ? t("关键词检索") : document.embeddingStatus === "ready" ? t("混合检索") : t("语义索引中")}</em>
-                      <button disabled={busy} onClick={() => void removeDocument(document)} aria-label={`删除 ${document.name}`}><Trash2 size={15} /></button>
+                      <em data-status={document.status === "failed" || document.embeddingStatus === "failed" ? "failed" : document.status === "processing" || document.embeddingStatus === "processing" || document.embeddingStatus === "pending" ? "processing" : "ready"}>{document.status === "failed" ? t("解析失败") : document.embeddingStatus === "failed" ? t("语义索引失败") : document.status === "processing" ? t("解析中") : document.embeddingStatus === "disabled" ? t("关键词检索") : document.embeddingStatus === "ready" ? t("混合检索") : document.embeddingStatus === "pending" ? t("待索引") : t("语义索引中")}</em>
+                      {document.status === "ready" && document.embeddingStatus === "failed" && (
+                        <button className="knowledge-retry" disabled={busy} onClick={() => void retryDocument(document)} aria-label={`${t("重新索引")} ${document.name}`} title={t("重新索引语义向量")}><RefreshCw size={14} /></button>
+                      )}
+                      <button disabled={busy} onClick={() => void removeDocument(document)} aria-label={`${t("删除")} ${document.name}`}><Trash2 size={15} /></button>
                     </div>
                   )) : (
                     <div className="knowledge-empty"><BookOpen size={24} /><strong>{t("还没有文档")}</strong><p>{t("上传文件或粘贴文本，系统会自动切分为适合模型检索的片段。")}</p></div>

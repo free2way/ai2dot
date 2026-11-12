@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
+import { useFeedback } from "@/lib/feedback";
 import { BrandMark } from "@/components/brand-mark";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import {
@@ -167,6 +168,7 @@ export function ProviderManager({
   initialSkills = [],
 }: Props) {
   const { t } = useLanguage();
+  const { confirm } = useFeedback();
   const [providers, setProviders] = useState(initialProviders);
   const [models, setModels] = useState(initialModels);
   const [selectedProviderId, setSelectedProviderId] = useState(
@@ -306,7 +308,15 @@ export function ProviderManager({
   };
 
   const deleteProvider = async (provider: ProviderSummary) => {
-    if (!window.confirm(`删除“${provider.name}”及其全部模型？此操作无法撤销。`)) {
+    if (
+      !(await confirm({
+        message: t("删除“{{name}}”及其全部模型？此操作无法撤销。", {
+          name: provider.name,
+        }),
+        tone: "danger",
+        confirmLabel: t("删除"),
+      }))
+    ) {
       return;
     }
     setBusyId(provider.id);
