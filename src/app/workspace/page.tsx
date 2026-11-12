@@ -62,6 +62,8 @@ export default async function WorkspacePage() {
         enabled: source.enabled,
         toolCount: source.tools.length,
         templateId: source.templateId,
+        url: source.url,
+        lastError: source.lastError,
       }))}
       initialSkills={skills.flatMap((skill) =>
         skill.versionId

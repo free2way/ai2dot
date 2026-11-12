@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { summarizePage } from "./api-client";
+import { summarizePage, uploadMarkdown, waitForKnowledgeDocument } from "./api-client";
 import type { ExtractedPage } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -51,3 +51,18 @@ describe("summary completion and failure", () => {
     await expect(summarize()).rejects.toMatchObject({ code: "RATE_LIMITED", status: 429 });
   });
 });
+describe("knowledge upload endpoints", () => {
+  it("uploads and polls through the extension-authenticated API", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ document: { id: "doc-1", status: "processing" } }, { status: 202 }))
+      .mockResolvedValueOnce(Response.json({ documents: [{ id: "doc-1", status: "ready", errorMessage: null }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const uploaded = await uploadMarkdown({ token: "synthetic-credential", knowledgeBaseId: "base-1", name: "page.md", content: "# Page" });
+    await waitForKnowledgeDocument({ token: "synthetic-credential", knowledgeBaseId: "base-1", documentId: uploaded.document.id });
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(String(url)).toMatch(/\/api\/extension\/knowledge-bases\/base-1\/documents$/);
+      expect(init.headers).toMatchObject({ Authorization: "Bearer synthetic-credential" });
+    }
+  });
+});
+

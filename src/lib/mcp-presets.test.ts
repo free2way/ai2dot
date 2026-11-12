@@ -1,5 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { MCP_PRESETS } from "@/lib/mcp-presets";
+import {
+  getAvailableMcpTemplateIdsFromSources,
+  MCP_PRESETS,
+  resolveMcpTemplateId,
+} from "@/lib/mcp-presets";
+
+describe("MCP template resolution", () => {
+  const source = {
+    id: "source-1",
+    enabled: true,
+    templateId: null,
+    url: "https://mcp.exa.ai/mcp/",
+    toolCount: 2,
+    lastError: null,
+  };
+
+  it("prefers the explicit template and falls back to a known preset URL", () => {
+    expect(resolveMcpTemplateId({ templateId: "github", url: "https://mcp.exa.ai/mcp" })).toBe("github");
+    expect(resolveMcpTemplateId({ templateId: null, url: "https://mcp.exa.ai/mcp/" })).toBe("exa");
+    expect(resolveMcpTemplateId({ templateId: null, url: "https://example.com/mcp" })).toBeNull();
+  });
+
+  it("only counts allowed, enabled, synced sources", () => {
+    expect([...getAvailableMcpTemplateIdsFromSources([source], ["source-1"])]).toEqual(["exa"]);
+    expect(getAvailableMcpTemplateIdsFromSources([source], []).size).toBe(0);
+    for (const broken of [
+      { ...source, enabled: false },
+      { ...source, toolCount: 0 },
+      { ...source, lastError: "connection refused" },
+    ]) {
+      expect(getAvailableMcpTemplateIdsFromSources([broken], ["source-1"]).size).toBe(0);
+    }
+  });
+});
 
 describe("MCP presets", () => {
   it("has unique identifiers and HTTPS documentation links", () => {

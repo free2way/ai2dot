@@ -1,6 +1,7 @@
 "use client";
 
 import { desktopBridge } from "@/lib/desktop-bridge";
+import { getAvailableMcpTemplateIdsFromSources } from "@/lib/mcp-presets";
 import { useChat } from "@ai-sdk/react";
 import { Show, UserButton } from "@clerk/nextjs";
 import {
@@ -196,6 +197,8 @@ type ChatWorkspaceProps = {
     enabled: boolean;
     toolCount: number;
     templateId: string | null;
+    url?: string | null;
+    lastError?: string | null;
   }[];
   initialSkills?: ChatSkillItem[];
 };
@@ -515,16 +518,12 @@ export function ChatWorkspace({
   const selectedKnowledgeBases = initialKnowledgeBases.filter((base) =>
     selectedKnowledgeBaseIds.includes(base.id),
   );
-  const availableMcpTemplateIds = initialMcpSources
-    .filter(
-      (source) =>
-        source.enabled &&
-        source.toolCount > 0 &&
-        source.templateId &&
-        selectedMcpSourceIds.includes(source.id),
-    )
-    .map((source) => source.templateId!)
-    .filter((id, index, items) => items.indexOf(id) === index);
+  const availableMcpTemplateIds = [
+    ...getAvailableMcpTemplateIdsFromSources(
+      initialMcpSources,
+      selectedMcpSourceIds,
+    ),
+  ];
   const activeConversation = conversationList.find(
     (conversation) => conversation.id === activeConversationId,
   );

@@ -121,6 +121,8 @@ export default async function ConversationPage({
         enabled: source.enabled,
         toolCount: source.tools.length,
         templateId: source.templateId,
+        url: source.url,
+        lastError: source.lastError,
       }))}
       initialSkills={skills.map((skill) => ({
         id: skill.id,

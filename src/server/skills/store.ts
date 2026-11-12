@@ -1,7 +1,7 @@
 import "server-only";
 
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { MCP_PRESETS } from "@/lib/mcp-presets";
+import { getAvailableMcpTemplateIdsFromSources } from "@/lib/mcp-presets";
 import {
   BUILT_IN_SKILL_PRESETS,
   getSkillCatalogEntry,
@@ -820,6 +820,8 @@ export async function getAvailableMcpTemplateIds(
   if (allowedSourceIds.length === 0) return new Set<string>();
   const rows = await getDb()
     .select({
+      id: mcpSources.id,
+      enabled: mcpSources.enabled,
       templateId: mcpSources.templateId,
       url: mcpSources.url,
       tools: mcpSources.tools,
@@ -833,18 +835,9 @@ export async function getAvailableMcpTemplateIds(
         inArray(mcpSources.id, [...new Set(allowedSourceIds)]),
       ),
     );
-  const templateByUrl = new Map(
-    MCP_PRESETS.flatMap((preset) =>
-      preset.url ? [[preset.url.replace(/\/$/, ""), preset.id] as const] : [],
-    ),
-  );
-  return new Set(
-    rows.flatMap((row) => {
-      if (row.lastError || row.tools.length === 0) return [];
-      const mapped =
-        row.templateId ?? templateByUrl.get(row.url.replace(/\/$/, ""));
-      return mapped ? [mapped] : [];
-    }),
+  return getAvailableMcpTemplateIdsFromSources(
+    rows.map((row) => ({ ...row, toolCount: row.tools?.length ?? 0 })),
+    allowedSourceIds,
   );
 }
 

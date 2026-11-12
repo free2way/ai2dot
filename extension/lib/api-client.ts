@@ -162,7 +162,7 @@ export async function uploadMarkdown({
   form.set("name", name);
   form.set("content", content);
   const response = await fetch(
-    `${API_ORIGIN}/api/knowledge-bases/${knowledgeBaseId}/documents`,
+    `${API_ORIGIN}/api/extension/knowledge-bases/${knowledgeBaseId}/documents`,
     {
       method: "POST",
       headers: authorization(token),
@@ -186,7 +186,7 @@ export async function waitForKnowledgeDocument({
 }) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const response = await fetch(
-      `${API_ORIGIN}/api/knowledge-bases/${knowledgeBaseId}`,
+      `${API_ORIGIN}/api/extension/knowledge-bases/${knowledgeBaseId}/documents`,
       {
         headers: authorization(token),
         cache: "no-store",

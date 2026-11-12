@@ -12,6 +12,52 @@ export type McpPreset = {
   recommended?: boolean;
 };
 
+function normalizeMcpUrl(url: string) {
+  return url.trim().replace(/\/+$/, "");
+}
+
+/** Maps a source to a preset id by explicit template, or by a known preset URL. */
+export function resolveMcpTemplateId(source: {
+  templateId: string | null;
+  url?: string | null;
+}) {
+  if (source.templateId) return source.templateId;
+  if (!source.url) return null;
+  const url = normalizeMcpUrl(source.url);
+  return (
+    MCP_PRESETS.find((preset) => preset.url && normalizeMcpUrl(preset.url) === url)
+      ?.id ?? null
+  );
+}
+
+export type McpDependencySource = {
+  id: string;
+  enabled: boolean;
+  templateId: string | null;
+  url?: string | null;
+  toolCount: number;
+  lastError?: string | null;
+};
+
+/**
+ * Template ids that can satisfy Skill MCP dependencies. Shared by the chat
+ * picker and server-side Skill resolution so both agree on availability.
+ */
+export function getAvailableMcpTemplateIdsFromSources(
+  sources: McpDependencySource[],
+  allowedSourceIds: string[],
+) {
+  const allowed = new Set(allowedSourceIds);
+  const templateIds = new Set<string>();
+  for (const source of sources) {
+    if (!allowed.has(source.id) || !source.enabled) continue;
+    if (source.lastError || source.toolCount === 0) continue;
+    const templateId = resolveMcpTemplateId(source);
+    if (templateId) templateIds.add(templateId);
+  }
+  return templateIds;
+}
+
 export const MCP_PRESETS: McpPreset[] = [
   {
     id: "exa",

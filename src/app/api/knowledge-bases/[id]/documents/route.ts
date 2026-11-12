@@ -1,24 +1,14 @@
 import { after } from "next/server";
 import { getWorkspaceContext } from "@/server/db/workspace";
 import {
-  extractKnowledgeFileContent,
-  MAX_KNOWLEDGE_FILE_SIZE,
-  resolveKnowledgeFileKind,
-  sanitizeKnowledgeFileName,
-} from "@/server/knowledge/extract";
-import {
-  createKnowledgeDocument,
-  failKnowledgeDocument,
-  indexKnowledgeDocument,
-  MAX_KNOWLEDGE_DOCUMENT_CHARACTERS,
-} from "@/server/knowledge/store";
-import { logServerEvent } from "@/server/observability/log";
-import { processKnowledgeEmbeddingJobs } from "@/server/knowledge/embedding-jobs";
+  isKnowledgeRequestTooLarge,
+  knowledgeErrorResponse,
+  prepareKnowledgeUpload,
+  REQUEST_TOO_LARGE_ERROR,
+  startKnowledgeIngestion,
+} from "@/server/knowledge/ingest";
 
 export const maxDuration = 300;
-
-// Multipart framing adds a small overhead on top of the file itself.
-const MAX_KNOWLEDGE_REQUEST_BYTES = MAX_KNOWLEDGE_FILE_SIZE + 1024 * 1024;
 
 export async function POST(
   request: Request,
@@ -27,123 +17,20 @@ export async function POST(
   const context = await getWorkspaceContext();
   if (!context) return Response.json({ message: "请先登录。" }, { status: 401 });
 
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_KNOWLEDGE_REQUEST_BYTES) {
-    return Response.json({ message: "上传内容不能超过 5MB。" }, { status: 413 });
+  if (isKnowledgeRequestTooLarge(request)) {
+    return knowledgeErrorResponse(REQUEST_TOO_LARGE_ERROR);
   }
 
   const { id } = await params;
-  const form = await request.formData();
-  const file = form.get("file");
-  const pastedContent = String(form.get("content") ?? "").trim();
-  const pastedName = String(form.get("name") ?? "").trim();
-
-  let name: string;
-  let mimeType: string;
-  let byteSize: number;
-  let content: string | undefined;
-  let fileBytes: Uint8Array | undefined;
-  let fileKind: ReturnType<typeof resolveKnowledgeFileKind> = null;
-
-  if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_KNOWLEDGE_FILE_SIZE) {
-      return Response.json({ message: "单个文件不能超过 4MB。" }, { status: 413 });
-    }
-    fileKind = resolveKnowledgeFileKind(file.name, file.type);
-    if (!fileKind) {
-      return Response.json(
-        { message: "当前支持 PDF、DOCX、TXT、Markdown、CSV 和 JSON 文件。" },
-        { status: 415 },
-      );
-    }
-    name = sanitizeKnowledgeFileName(file.name) || "未命名文档";
-    mimeType =
-      file.type ||
-      (fileKind === "pdf"
-        ? "application/pdf"
-        : fileKind === "docx"
-          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          : "text/plain");
-    byteSize = file.size;
-    fileBytes = new Uint8Array(await file.arrayBuffer());
-  } else {
-    if (!pastedName || !pastedContent) {
-      return Response.json({ message: "请输入文档名称和正文。" }, { status: 400 });
-    }
-    if (pastedContent.length > MAX_KNOWLEDGE_DOCUMENT_CHARACTERS) {
-      return Response.json(
-        { message: "文档正文不能超过 500,000 个字符。" },
-        { status: 413 },
-      );
-    }
-    name = pastedName.slice(0, 160);
-    mimeType = "text/plain";
-    byteSize = new TextEncoder().encode(pastedContent).byteLength;
-    content = pastedContent;
-  }
+  const upload = await prepareKnowledgeUpload(await request.formData());
+  if (!upload.ok) return knowledgeErrorResponse(upload);
 
   try {
-    const document = await createKnowledgeDocument(context, {
-      knowledgeBaseId: id,
-      name,
-      mimeType,
-      byteSize,
-    });
-    if (!document) return Response.json({ message: "知识库不存在。" }, { status: 404 });
-
-    const indexDocument = async () => {
-      const startedAt = Date.now();
-      try {
-        const extractedContent =
-          content ??
-          (fileBytes && fileKind
-            ? await extractKnowledgeFileContent({ bytes: fileBytes, kind: fileKind })
-            : "");
-        const indexed = await indexKnowledgeDocument(context, {
-          knowledgeBaseId: id,
-          documentId: document.id,
-          content: extractedContent,
-        });
-        logServerEvent("info", "knowledge.document_indexed", {
-          workspaceId: context.workspaceId,
-          knowledgeBaseId: id,
-          documentId: document.id,
-          mimeType,
-          chunkCount: indexed.chunkCount,
-          latencyMs: Date.now() - startedAt,
-        });
-        const embeddingResult = await processKnowledgeEmbeddingJobs({
-          maxJobs: 1,
-          maxChunksPerJob: 512,
-          preferredDocumentId: document.id,
-        });
-        logServerEvent("info", "knowledge.document_embedded", {
-          workspaceId: context.workspaceId,
-          knowledgeBaseId: id,
-          documentId: document.id,
-          ...embeddingResult,
-          latencyMs: Date.now() - startedAt,
-        });
-      } catch (error) {
-        await failKnowledgeDocument(context, {
-          knowledgeBaseId: id,
-          documentId: document.id,
-          error,
-        });
-        logServerEvent("error", "knowledge.document_failed", {
-          workspaceId: context.workspaceId,
-          knowledgeBaseId: id,
-          documentId: document.id,
-          mimeType,
-          error: error instanceof Error ? error.message : String(error),
-          latencyMs: Date.now() - startedAt,
-        });
-      }
-    };
-
-    after(indexDocument);
+    const started = await startKnowledgeIngestion(context, id, upload, "web");
+    if (!started) return Response.json({ message: "知识库不存在。" }, { status: 404 });
+    after(started.run);
     return Response.json(
-      { document: { ...document, status: "processing" } },
+      { document: { ...started.document, status: "processing" } },
       { status: 202 },
     );
   } catch (error) {
